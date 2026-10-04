@@ -1,0 +1,53 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "adminConfig": {
+      "password": {
+        ".read": false,
+        ".write": false
+      }
+    },
+
+    "hostClaim": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid && newData.val() === root.child('adminConfig/password').val()",
+        ".validate": "newData.isString()"
+      }
+    },
+
+    "session": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('hostClaim').child(auth.uid).exists()"
+    },
+
+    "questions": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('hostClaim').child(auth.uid).exists()"
+    },
+
+    "participants": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('hostClaim').child(auth.uid).exists()",
+      "$uid": {
+        ".write": "auth != null && (auth.uid === $uid || root.child('hostClaim').child(auth.uid).exists())",
+        ".validate": "newData.hasChildren(['joinedAt'])"
+      }
+    },
+
+    "votes": {
+      ".read": "auth != null && root.child('session/status').val() === 'revealed'",
+      ".write": "auth != null && root.child('hostClaim').child(auth.uid).exists()",
+      "$qIndex": {
+        ".read": "auth != null && root.child('hostClaim').child(auth.uid).exists()",
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && auth.uid === $uid && !data.exists() && root.child('session/status').val() === 'voting' && (root.child('session/currentQuestionIndex').val() + '') === $qIndex",
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3"
+        }
+      }
+    }
+  }
+}

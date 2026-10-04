@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>AI未来予測 - 投票</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">新郎新婦クイズ★</div>
+  <h1 class="title">クイズに参加しよう！</h1>
+
+  <div id="joinScreen" class="card">
+    <label for="nicknameInput">お名前・ニックネーム（空欄でもOK）</label>
+    <input type="text" id="nicknameInput" placeholder="例：たなか" maxlength="20">
+    <button id="joinBtn" class="btn-primary btn-block" style="margin-top:14px;">参加する</button>
+    <p class="small-note">個人情報の入力は不要です。名前は順位発表にのみ使われます。</p>
+  </div>
+
+  <div id="voteScreen" style="display:none;">
+    <div class="card">
+      <div class="row" style="align-items:center;">
+        <span class="status-pill" id="questionCounter">第1問</span>
+        <span class="status-pill" id="statusPill">待機中</span>
+      </div>
+      <h2 class="title" id="questionText" style="margin-top:14px; font-size:19px; color:var(--ink); text-shadow:none;">問題を待っています…</h2>
+
+      <div class="option-grid" id="optionGrid"></div>
+    </div>
+  </div>
+
+  <div id="doneMsg" class="center-msg" style="display:none;">
+    <p style="font-size:20px;">投票ありがとうございました！</p>
+    <p>結果はスクリーンをご覧ください。</p>
+  </div>
+</div>
+
+<script type="module">
+import { firebaseConfig } from './js/firebase-config.js';
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getDatabase, ref, set, get, onValue, child } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getDatabase(app);
+
+const joinScreen = document.getElementById('joinScreen');
+const voteScreen = document.getElementById('voteScreen');
+const doneMsg = document.getElementById('doneMsg');
+const nicknameInput = document.getElementById('nicknameInput');
+const joinBtn = document.getElementById('joinBtn');
+const questionText = document.getElementById('questionText');
+const optionGrid = document.getElementById('optionGrid');
+const statusPill = document.getElementById('statusPill');
+const questionCounter = document.getElementById('questionCounter');
+
+let myUid = null;
+let currentSession = { status: 'waiting', currentQuestionIndex: 0 };
+let currentQuestions = [];
+let hasVotedThisQuestion = false;
+
+const alreadyJoined = localStorage.getItem('wq_joined') === '1';
+
+onAuthStateChanged(auth, (user) => {
+  if (!user) return;
+  myUid = user.uid;
+  if (alreadyJoined) showVoteScreen();
+  listenSession();
+  listenQuestions();
+});
+
+signInAnonymously(auth).catch((err) => {
+  alert('接続に失敗しました。電波の良い場所で再度お試しください。');
+  console.error(err);
+});
+
+joinBtn.addEventListener('click', async () => {
+  if (!myUid) { alert('接続中です。数秒待って再度お試しください。'); return; }
+  const nickname = nicknameInput.value.trim() || ('ゲスト' + myUid.slice(0, 4));
+  joinBtn.disabled = true;
+  try {
+    await set(ref(db, `participants/${myUid}`), { nickname, joinedAt: Date.now(), won: false });
+    localStorage.setItem('wq_nickname', nickname);
+    localStorage.setItem('wq_joined', '1');
+    showVoteScreen();
+  } catch (e) {
+    alert('参加処理に失敗しました。もう一度お試しください。');
+    joinBtn.disabled = false;
+    console.error(e);
+  }
+});
+
+function showVoteScreen() { joinScreen.style.display = 'none'; voteScreen.style.display = 'block'; }
+
+function listenSession() {
+  onValue(ref(db, 'session'), (snap) => {
+    const val = snap.val() || {};
+    currentSession = { status: val.status || 'waiting', currentQuestionIndex: val.currentQuestionIndex || 0 };
+    renderQuestionState();
+  });
+}
+
+function listenQuestions() {
+  onValue(ref(db, 'questions'), (snap) => {
+    currentQuestions = snap.val() || [];
+    renderQuestionState();
+  });
+}
+
+async function renderQuestionState() {
+  if (!myUid) return;
+  const qIndex = currentSession.currentQuestionIndex;
+  questionCounter.textContent = `第${qIndex + 1}問` + (currentQuestions.length ? ` / ${currentQuestions.length}問` : '');
+
+  statusPill.className = 'status-pill ' + currentSession.status;
+  statusPill.textContent =
+    currentSession.status === 'voting' ? '投票受付中' :
+    currentSession.status === 'closed' ? '締切' :
+    currentSession.status === 'revealed' ? '結果発表' : '待機中';
+
+  const q = currentQuestions[qIndex];
+
+  const voteSnap = await get(child(ref(db), `votes/${qIndex}/${myUid}`));
+  hasVotedThisQuestion = voteSnap.exists();
+
+  if (hasVotedThisQuestion) {
+    voteScreen.style.display = 'none';
+    doneMsg.style.display = 'block';
+    return;
+  } else {
+    doneMsg.style.display = 'none';
+    voteScreen.style.display = 'block';
+  }
+
+  if (!q || currentSession.status !== 'voting') {
+    questionText.textContent = currentSession.status === 'closed'
+      ? '締め切りました。結果をお待ちください…'
+      : '次の問題をお待ちください…';
+    optionGrid.innerHTML = '';
+    return;
+  }
+
+  questionText.textContent = q.text || '';
+  optionGrid.innerHTML = '';
+  (q.options || []).forEach((optText, i) => {
+    const btn = document.createElement('button');
+    btn.className = `option-btn opt-${i}`;
+    btn.innerHTML = `<span class="badge">${'ABCD'[i]}</span><span>${escapeHtml(optText)}</span>`;
+    btn.addEventListener('click', () => submitVote(qIndex, i, btn));
+    optionGrid.appendChild(btn);
+  });
+}
+
+async function submitVote(qIndex, optionIndex, btnEl) {
+  const buttons = optionGrid.querySelectorAll('.option-btn');
+  buttons.forEach(b => b.disabled = true);
+  btnEl.classList.add('selected');
+  try {
+    await set(ref(db, `votes/${qIndex}/${myUid}`), optionIndex);
+    voteScreen.style.display = 'none';
+    doneMsg.style.display = 'block';
+    launchConfetti();
+  } catch (e) {
+    alert('投票に失敗しました（すでに投票済みか、受付時間外の可能性があります）。');
+    buttons.forEach(b => b.disabled = false);
+    console.error(e);
+  }
+}
+
+function launchConfetti() {
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:999;';
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+  const colors = ['#FF5A5F', '#3DA9FC', '#FFD23F', '#3FCB7E', '#FF6FA5'];
+  const pieces = Array.from({ length: 140 }, () => ({
+    x: Math.random() * canvas.width,
+    y: -20 - Math.random() * canvas.height * 0.4,
+    r: 5 + Math.random() * 6,
+    c: colors[Math.floor(Math.random() * colors.length)],
+    vy: 2.5 + Math.random() * 3.5,
+    vx: -1.5 + Math.random() * 3,
+    rot: Math.random() * 360,
+    vr: -8 + Math.random() * 16
+  }));
+  let frame = 0;
+  function tick() {
+    frame++;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    pieces.forEach(p => {
+      p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot * Math.PI / 180);
+      ctx.fillStyle = p.c;
+      ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 0.6);
+      ctx.restore();
+    });
+    if (frame < 150) requestAnimationFrame(tick); else canvas.remove();
+  }
+  tick();
+}
+
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>
