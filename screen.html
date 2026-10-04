@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI未来予測 - スクリーン</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/screen.css">
+</head>
+<body class="screen-page">
+
+<div id="gate" class="gate" style="display:none;">
+  <div class="card">
+    <h2 class="title" style="font-size:20px; color:var(--ink); text-shadow:none;">スクリーン表示</h2>
+    <p class="small-note">司会者パスワードを入力してください。<br>（司会者画面にログイン済みのブラウザなら不要です）</p>
+    <input type="password" id="pwInput" placeholder="パスワード" style="margin-top:12px;">
+    <button id="pwSubmit" class="btn-primary btn-block" style="margin-top:12px;">表示する</button>
+    <p class="error-text" id="pwError" style="display:none;">パスワードが違います。</p>
+  </div>
+</div>
+
+<div id="stage" class="stage" style="display:none;">
+  <header class="stage-head">
+    <span class="eyebrow stage-eyebrow">新郎新婦クイズ★</span>
+    <span class="stage-pill" id="qCounter"></span>
+    <span class="stage-pill" id="statusPill"></span>
+    <span class="stage-pill stage-count" id="answerCount"></span>
+  </header>
+  <main id="stageBody" class="stage-body"></main>
+</div>
+
+<button id="fsBtn" class="fs-btn" type="button">⛶ 全画面にする</button>
+
+<script type="module">
+import { firebaseConfig } from './js/firebase-config.js';
+import { OPTION_LABELS, hasCorrect, tallyVotes, computeRanking, rankMedal, escapeHtml } from './js/quiz-utils.js';
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getDatabase(app);
+
+const isPreview = new URLSearchParams(location.search).has('preview');
+const gate = document.getElementById('gate');
+const stage = document.getElementById('stage');
+const stageBody = document.getElementById('stageBody');
+const fsBtn = document.getElementById('fsBtn');
+
+let myUid = null;
+let started = false;
+let session = { status: 'waiting', currentQuestionIndex: 0, screen: { mode: 'auto' } };
+let questions = [];
+let participants = {};
+let votes = {};
+let viewKey = null;
+
+signInAnonymously(auth).catch(e => console.error(e));
+onAuthStateChanged(auth, async (user) => {
+  if (!user || started) return;
+  myUid = user.uid;
+  const claim = await get(ref(db, `hostClaim/${myUid}`)).catch(() => null);
+  if (claim && claim.exists()) start();
+  else gate.style.display = 'flex';
+});
+
+document.getElementById('pwSubmit').addEventListener('click', async () => {
+  const pw = document.getElementById('pwInput').value;
+  if (!pw || !myUid) return;
+  try {
+    await set(ref(db, `hostClaim/${myUid}`), pw);
+    start();
+  } catch (e) {
+    document.getElementById('pwError').style.display = 'block';
+  }
+});
+
+/* ---------- 全画面ボタン（マウスを動かすと出てくる） ---------- */
+
+if (isPreview) {
+  fsBtn.remove();
+  document.body.classList.add('is-preview');
+} else {
+  let idleTimer;
+  const wake = () => {
+    document.body.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => document.body.classList.add('idle'), 2500);
+  };
+  document.addEventListener('mousemove', wake);
+  wake();
+  fsBtn.addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen();
+  });
+  document.addEventListener('fullscreenchange', () => {
+    fsBtn.textContent = document.fullscreenElement ? '全画面を解除' : '⛶ 全画面にする';
+  });
+}
+
+/* ---------- データ購読 ---------- */
+
+function start() {
+  started = true;
+  gate.style.display = 'none';
+  stage.style.display = 'flex';
+
+  onValue(ref(db, 'session'), (snap) => {
+    const val = snap.val() || {};
+    const prevIndex = session.currentQuestionIndex;
+    session = {
+      status: val.status || 'waiting',
+      currentQuestionIndex: val.currentQuestionIndex || 0,
+      screen: val.screen || { mode: 'auto' }
+    };
+    if (prevIndex !== session.currentQuestionIndex || !votesUnsub) listenVotes();
+    render();
+  });
+  onValue(ref(db, 'questions'), (snap) => { questions = snap.val() || []; viewKey = null; render(); });
+  onValue(ref(db, 'participants'), (snap) => { participants = snap.val() || {}; render(); });
+}
+
+let votesUnsub = null;
+function listenVotes() {
+  if (votesUnsub) votesUnsub();
+  votes = {};
+  votesUnsub = onValue(ref(db, `votes/${session.currentQuestionIndex}`), (snap) => {
+    votes = snap.val() || {};
+    render();
+  });
+}
+
+/* ---------- 描画 ---------- */
+
+function currentView() {
+  const mode = session.screen?.mode || 'auto';
+  if (mode === 'join' || mode === 'photo' || mode === 'ranking') return mode;
+  if (!questions.length) return 'join';
+  return session.status === 'revealed' ? 'reveal' : 'question';
+}
+
+function render() {
+  if (!started) return;
+  const view = currentView();
+  const scr = session.screen || {};
+  const key = [view, session.currentQuestionIndex, view === 'question' ? '' : session.status, scr.qid, scr.photoKey, scr.at].join('|');
+
+  if (key !== viewKey) {
+    const prevView = viewKey ? viewKey.split('|')[0] : null;
+    viewKey = key;
+    stageBody.className = 'stage-body view-' + view;
+    if (view === 'join') buildJoin();
+    else if (view === 'photo') buildPhoto(scr);
+    else if (view === 'ranking') buildRanking();
+    else buildQuestion(view === 'reveal');
+    if (view === 'reveal' && prevView === 'question' && !isPreview) launchConfetti();
+  }
+  updateHeader(view);
+  updateDynamic(view);
+}
+
+function updateHeader(view) {
+  const q = questions[session.currentQuestionIndex];
+  const showQ = (view === 'question' || view === 'reveal' || view === 'photo') && q;
+  document.getElementById('qCounter').textContent = showQ ? `第${session.currentQuestionIndex + 1}問 / ${questions.length}問` : '';
+  const pill = document.getElementById('statusPill');
+  const label =
+    view === 'join' ? '' :
+    view === 'ranking' ? '正解ランキング' :
+    view === 'photo' ? '' :
+    session.status === 'voting' ? '回答受付中！' :
+    session.status === 'closed' ? '締切' :
+    session.status === 'revealed' ? '結果発表' : 'まもなく受付開始';
+  pill.textContent = label;
+  pill.className = 'stage-pill ' + (view === 'question' || view === 'reveal' ? session.status : '');
+  document.querySelectorAll('.stage-pill').forEach(el => el.style.display = el.textContent ? '' : 'none');
+}
+
+function updateDynamic(view) {
+  const total = Object.keys(participants).length;
+  const answered = Object.keys(votes).length;
+  const countEl = document.getElementById('answerCount');
+  countEl.textContent = (view === 'question' && session.status !== 'waiting') || view === 'reveal'
+    ? `${answered} / ${total}人が回答` : '';
+  countEl.style.display = countEl.textContent ? '' : 'none';
+
+  const joinCount = document.getElementById('joinCount');
+  if (joinCount) joinCount.textContent = total;
+
+  if (view === 'reveal') {
+    const counts = tallyVotes(votes);
+    const sum = counts.reduce((a, b) => a + b, 0);
+    counts.forEach((c, i) => {
+      const pct = sum > 0 ? Math.round((c / sum) * 100) : 0;
+      const fill = document.getElementById(`fill-${i}`);
+      const num = document.getElementById(`num-${i}`);
+      if (fill) requestAnimationFrame(() => { fill.style.width = pct + '%'; });
+      if (num) num.textContent = `${c}票（${pct}%）`;
+    });
+  }
+}
+
+function buildJoin() {
+  const url = new URL('index.html', location.href).href;
+  stageBody.innerHTML = `
+    <div class="join-wrap">
+      <div class="join-text">
+        <h1 class="stage-title">クイズに参加しよう！</h1>
+        <p class="join-lead">スマホのカメラで<br>QRコードを読み取ってください</p>
+        <p class="join-url">${escapeHtml(url)}</p>
+        <p class="join-count">参加者 <b id="joinCount">0</b> 人</p>
+      </div>
+      <div class="join-qr"><img src="img/join-qr.png" alt="参加用QRコード"></div>
+    </div>`;
+}
+
+function buildQuestion(reveal) {
+  const q = questions[session.currentQuestionIndex];
+  if (!q) { buildJoin(); return; }
+  const showCorrect = reveal && hasCorrect(q);
+  const opts = (q.options || []).map((t, i) => ({ t, i })).filter(o => o.t);
+  stageBody.innerHTML = `
+    <h1 class="stage-question">${escapeHtml(q.text || '')}</h1>
+    <div class="stage-options ${reveal ? 'is-reveal' : ''}">
+      ${opts.map(({ t, i }) => {
+        const correct = showCorrect && q.correctIndex === i;
+        const dim = showCorrect && !correct;
+        return `
+        <div class="stage-opt opt-${i} ${correct ? 'is-correct' : ''} ${dim ? 'is-dim' : ''}">
+          <div class="stage-opt-main">
+            <span class="stage-badge">${OPTION_LABELS[i]}</span>
+            <span class="stage-opt-text">${escapeHtml(t)}</span>
+            ${correct ? '<span class="stage-correct">★正解</span>' : ''}
+          </div>
+          ${reveal ? `
+          <div class="stage-bar">
+            <div class="stage-bar-track"><div class="stage-bar-fill" id="fill-${i}"></div></div>
+            <span class="stage-bar-num" id="num-${i}"></span>
+          </div>` : ''}
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+async function buildPhoto(scr) {
+  stageBody.innerHTML = '<div class="photo-wrap"><p class="photo-loading">写真を読み込み中…</p></div>';
+  const myKey = viewKey;
+  const snap = await get(ref(db, `media/${scr.qid}/${scr.photoKey}`)).catch(() => null);
+  if (viewKey !== myKey) return; // 読み込み中に表示が切り替わった
+  const data = snap && snap.val();
+  stageBody.innerHTML = data
+    ? `<div class="photo-wrap"><img src="${data}" alt=""></div>`
+    : '<div class="photo-wrap"><p class="photo-loading">写真が見つかりませんでした</p></div>';
+}
+
+async function buildRanking() {
+  stageBody.innerHTML = '<h1 class="stage-title">正解ランキング</h1><ol class="stage-ranking" id="stageRanking"></ol>';
+  const myKey = viewKey;
+  const rows = (await computeRanking(db, questions, participants)).slice(0, 10);
+  if (viewKey !== myKey) return;
+  const list = document.getElementById('stageRanking');
+  if (!rows.length) { list.innerHTML = '<li>参加者がいません</li>'; return; }
+  // 下位から順に登場させる
+  list.innerHTML = rows.map((r, i) => `
+    <li class="${r.rank <= 3 ? 'rank-' + r.rank : ''}" style="animation-delay:${(rows.length - 1 - i) * 0.6}s">
+      <span class="rank-num">${rankMedal(r.rank)}</span>
+      <span class="rank-name">${escapeHtml(r.nickname)}</span>
+      <span class="rank-score">${r.score}問正解</span>
+    </li>`).join('');
+}
+
+function launchConfetti() {
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:999;';
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+  const colors = ['#FF5A5F', '#3DA9FC', '#FFD23F', '#3FCB7E', '#FF6FA5'];
+  const pieces = Array.from({ length: 260 }, () => ({
+    x: Math.random() * canvas.width,
+    y: -20 - Math.random() * canvas.height * 0.5,
+    r: 8 + Math.random() * 10,
+    c: colors[Math.floor(Math.random() * colors.length)],
+    vy: 3 + Math.random() * 4,
+    vx: -2 + Math.random() * 4,
+    rot: Math.random() * 360,
+    vr: -8 + Math.random() * 16
+  }));
+  let frame = 0;
+  function tick() {
+    frame++;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    pieces.forEach(p => {
+      p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot * Math.PI / 180);
+      ctx.fillStyle = p.c;
+      ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 0.6);
+      ctx.restore();
+    });
+    if (frame < 220) requestAnimationFrame(tick); else canvas.remove();
+  }
+  tick();
+}
+</script>
+</body>
+</html>

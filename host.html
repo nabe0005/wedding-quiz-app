@@ -30,6 +30,21 @@
   </div>
 
   <div class="card">
+    <h3 style="font-size:16px;">スクリーン表示</h3>
+    <button id="openScreenBtn" class="btn-primary btn-block" style="margin-top:10px;">スクリーン画面を開く（プロジェクター側へ）</button>
+    <div class="screen-preview" id="screenPreview">
+      <iframe id="screenPreviewFrame" title="スクリーンのプレビュー" tabindex="-1"></iframe>
+    </div>
+    <p class="small-note">いまの表示：<b id="screenModeLabel">問題（自動）</b></p>
+    <div class="row" style="margin-top:8px;">
+      <button class="btn-secondary screen-mode-btn" data-mode="auto">問題（自動）</button>
+      <button class="btn-secondary screen-mode-btn" data-mode="join">参加QRコード</button>
+      <button class="btn-secondary screen-mode-btn" data-mode="ranking">ランキング発表</button>
+    </div>
+    <p class="small-note">「投票受付開始」「締切」「結果を公開」「次の問題へ」を押すと、スクリーンは自動で問題表示に戻ります。</p>
+  </div>
+
+  <div class="card">
     <h3 style="font-size:16px;">問題の編集</h3>
     <div id="questionEditors"></div>
     <button id="addQuestionBtn" class="btn-secondary btn-block" style="margin-top:14px;">＋ 問題を追加</button>
@@ -47,6 +62,8 @@
       <button id="revealBtn" class="btn-secondary">結果を公開</button>
       <button id="nextBtn" class="btn-secondary">次の問題へ</button>
     </div>
+    <h4 style="font-size:13px; margin-top:16px;">この問題の写真（押すとスクリーンに大きく表示）</h4>
+    <div class="media-strip" id="currentMedia"></div>
   </div>
 
   <div class="card">
@@ -70,16 +87,17 @@
 
   <div class="card">
     <h3 style="font-size:16px; color:var(--red);">終了処理</h3>
-    <p class="small-note">余興終了後、投票・参加者データを完全に削除します（元に戻せません）。</p>
+    <p class="small-note">余興終了後、問題・写真・投票・参加者データを完全に削除します（元に戻せません）。</p>
     <button id="resetBtn" class="btn-danger btn-block">投票データを全削除する</button>
   </div>
 </div>
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
+import { tallyVotes, computeRanking, rankMedal, newQuestionId, compressImage, escapeHtml } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getDatabase, ref, set, get, update, onValue, child } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getDatabase, ref, set, get, update, onValue, child, push, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -96,6 +114,7 @@ let currentSession = { status: 'waiting', currentQuestionIndex: 0 };
 let currentQuestions = [];      // 保存済み（DBの最新データ）
 let editingQuestions = [];      // 編集中のローカルコピー
 let currentParticipants = {};
+let mediaThumbs = {};           // { 問題ID: { 写真キー: 縮小画像 } }
 
 signInAnonymously(auth).catch(e => console.error(e));
 onAuthStateChanged(auth, (user) => { if (user) myUid = user.uid; });
@@ -121,10 +140,12 @@ function initHostDashboard() {
   listenSession();
   listenQuestionsForEditor();
   listenVotesForTally();
+  listenMediaThumbs();
+  initScreenControls();
 
-  document.getElementById('startBtn').onclick = (e) => { flashButton(e.currentTarget); updateSession({ status: 'voting' }); showToast('投票受付を開始しました'); };
-  document.getElementById('closeBtn').onclick = (e) => { flashButton(e.currentTarget); updateSession({ status: 'closed' }); showToast('締切りました'); };
-  document.getElementById('revealBtn').onclick = (e) => { flashButton(e.currentTarget); updateSession({ status: 'revealed' }); showToast('結果を公開しました'); };
+  document.getElementById('startBtn').onclick = (e) => { flashButton(e.currentTarget); updateSession({ status: 'voting', screen: { mode: 'auto' } }); showToast('投票受付を開始しました'); };
+  document.getElementById('closeBtn').onclick = (e) => { flashButton(e.currentTarget); updateSession({ status: 'closed', screen: { mode: 'auto' } }); showToast('締切りました'); };
+  document.getElementById('revealBtn').onclick = (e) => { flashButton(e.currentTarget); updateSession({ status: 'revealed', screen: { mode: 'auto' } }); showToast('結果を公開しました'); };
   document.getElementById('nextBtn').onclick = (e) => { flashButton(e.currentTarget); onNextQuestion(); };
   document.getElementById('saveQuestionsBtn').onclick = (e) => { flashButton(e.currentTarget); saveQuestions(); };
   document.getElementById('addQuestionBtn').onclick = (e) => { flashButton(e.currentTarget); addQuestion(); };
@@ -163,8 +184,103 @@ async function onNextQuestion() {
     alert('最後の問題です。正解ランキングを表示しましょう。');
     return;
   }
-  await update(ref(db, 'session'), { status: 'waiting', currentQuestionIndex: next });
+  await update(ref(db, 'session'), { status: 'waiting', currentQuestionIndex: next, screen: { mode: 'auto' } });
   showToast(`第${next + 1}問に進みました`);
+}
+
+/* ---------- スクリーン表示の切り替え ---------- */
+
+const SCREEN_MODE_LABELS = { auto: '問題（自動）', join: '参加QRコード', ranking: 'ランキング発表', photo: '写真' };
+
+function initScreenControls() {
+  document.getElementById('screenPreviewFrame').src = 'screen.html?preview=1';
+  document.getElementById('openScreenBtn').onclick = () => {
+    window.open('screen.html', 'quizScreen', 'popup,width=1280,height=720');
+  };
+  document.querySelectorAll('.screen-mode-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      flashButton(e.currentTarget);
+      const mode = btn.dataset.mode;
+      setScreen(mode === 'ranking' ? { mode, at: Date.now() } : { mode });
+    };
+  });
+
+  // プレビューは実際のスクリーン（1280×720）を縮小して表示
+  const box = document.getElementById('screenPreview');
+  const frame = document.getElementById('screenPreviewFrame');
+  new ResizeObserver(() => { frame.style.transform = `scale(${box.clientWidth / 1280})`; }).observe(box);
+}
+
+function setScreen(screen) {
+  update(ref(db, 'session'), { screen })
+    .then(() => showToast(`スクリーン：${SCREEN_MODE_LABELS[screen.mode]}`))
+    .catch(e => alert('切り替えに失敗しました: ' + e.message));
+}
+
+function renderScreenModeLabel() {
+  const scr = currentSession.screen || { mode: 'auto' };
+  document.getElementById('screenModeLabel').textContent = SCREEN_MODE_LABELS[scr.mode] || SCREEN_MODE_LABELS.auto;
+  document.querySelectorAll('.screen-mode-btn').forEach(btn => {
+    btn.classList.toggle('btn-primary', btn.dataset.mode === (scr.mode || 'auto'));
+  });
+  document.querySelectorAll('.media-thumb').forEach(el => {
+    el.classList.toggle('on-screen', scr.mode === 'photo' && el.dataset.qid === scr.qid && el.dataset.key === scr.photoKey);
+  });
+}
+
+/* ---------- 写真（問題IDごとに保存。スクリーン用の画像と一覧用の縮小画像を分けて持つ） ---------- */
+
+function listenMediaThumbs() {
+  onValue(ref(db, 'mediaThumbs'), (snap) => {
+    mediaThumbs = snap.val() || {};
+    renderAllMediaStrips();
+  });
+}
+
+function renderAllMediaStrips() {
+  document.querySelectorAll('.qe-media').forEach(el => renderMediaStrip(el, el.dataset.qid, true));
+  const q = currentQuestions[currentSession.currentQuestionIndex || 0];
+  const cur = document.getElementById('currentMedia');
+  if (q && q.id) renderMediaStrip(cur, q.id, false);
+  else cur.innerHTML = '<p class="small-note">写真はありません</p>';
+  renderScreenModeLabel();
+}
+
+function renderMediaStrip(container, qid, editable) {
+  const items = Object.entries(mediaThumbs[qid] || {});
+  if (!editable && !items.length) { container.innerHTML = '<p class="small-note">写真はありません（問題の編集から追加できます）</p>'; return; }
+  container.innerHTML = items.map(([key, thumb]) => `
+    <div class="media-thumb" data-qid="${qid}" data-key="${key}">
+      <img src="${thumb}" alt="">
+      ${editable
+        ? `<button type="button" class="media-del" data-key="${key}">×</button>`
+        : `<button type="button" class="media-show" data-key="${key}">映す</button>`}
+    </div>`).join('');
+
+  container.querySelectorAll('.media-show').forEach(btn => btn.onclick = (e) => {
+    flashButton(e.currentTarget);
+    setScreen({ mode: 'photo', qid, photoKey: btn.dataset.key });
+  });
+  container.querySelectorAll('.media-del').forEach(btn => btn.onclick = async () => {
+    if (!confirm('この写真を削除しますか？')) return;
+    await update(ref(db), { [`media/${qid}/${btn.dataset.key}`]: null, [`mediaThumbs/${qid}/${btn.dataset.key}`]: null });
+  });
+}
+
+async function uploadMedia(qid, files, statusEl) {
+  let done = 0;
+  for (const file of files) {
+    statusEl.textContent = `アップロード中… (${done + 1}/${files.length})`;
+    try {
+      const [full, thumb] = await Promise.all([compressImage(file, 1600, 0.82), compressImage(file, 240, 0.7)]);
+      const key = push(ref(db, `media/${qid}`)).key;
+      await update(ref(db), { [`media/${qid}/${key}`]: full, [`mediaThumbs/${qid}/${key}`]: thumb });
+      done++;
+    } catch (e) {
+      alert(`「${file.name}」を追加できませんでした: ${e.message}`);
+    }
+  }
+  statusEl.textContent = done ? `${done}枚追加しました` : '';
 }
 
 /* ---------- 問題エディタ（自由に追加・削除できる） ---------- */
@@ -196,9 +312,25 @@ function buildQuestionEditors() {
           正解なし（予想・未来の問題など）
         </label>
       </div>
+      <div class="qe-media-area">
+        <label>スクリーンに映す写真・画像</label>
+        <div class="media-strip qe-media" data-qid="${q.id}"></div>
+        <label class="media-add">
+          ＋ 写真を追加
+          <input type="file" accept="image/*" multiple class="qe-file" data-qid="${q.id}" hidden>
+        </label>
+        <span class="small-note qe-upload-status"></span>
+      </div>
     `;
     container.appendChild(box);
   });
+
+  container.querySelectorAll('.qe-file').forEach(el => el.addEventListener('change', async e => {
+    const files = [...e.target.files];
+    e.target.value = '';
+    if (files.length) await uploadMedia(e.target.dataset.qid, files, e.target.closest('.qe-media-area').querySelector('.qe-upload-status'));
+  }));
+  renderAllMediaStrips();
 
   container.querySelectorAll('.qe-text').forEach(el => el.addEventListener('input', e => {
     editingQuestions[+e.target.dataset.idx].text = e.target.value;
@@ -221,20 +353,30 @@ function buildQuestionEditors() {
   }));
 }
 
+function blankQuestion() {
+  return { id: newQuestionId(), text: '', options: ['', '', '', ''], correctIndex: null };
+}
+
 function addQuestion() {
-  editingQuestions.push({ text: '', options: ['', '', '', ''], correctIndex: null });
+  editingQuestions.push(blankQuestion());
   buildQuestionEditors();
 }
 
 function listenQuestionsForEditor() {
   onValue(ref(db, 'questions'), (snap) => {
     currentQuestions = snap.val() || [];
+    // 写真のひも付け用IDがない（以前に保存した）問題にはIDを振っておく
+    const missing = {};
+    currentQuestions.forEach((q, i) => { if (q && !q.id) missing[`questions/${i}/id`] = newQuestionId(); });
+    if (Object.keys(missing).length) { update(ref(db), missing); return; }
+
     editingQuestions = currentQuestions.map(q => ({
+      id: q.id,
       text: q.text || '',
       options: (q.options && q.options.length === 4) ? [...q.options] : ['', '', '', ''],
       correctIndex: (q.correctIndex === 0 || q.correctIndex > 0) ? q.correctIndex : null
     }));
-    if (editingQuestions.length === 0) editingQuestions.push({ text: '', options: ['', '', '', ''], correctIndex: null });
+    if (editingQuestions.length === 0) editingQuestions.push(blankQuestion());
     buildQuestionEditors();
     renderTallyForCurrentQuestion();
     renderSummary();
@@ -244,6 +386,13 @@ function listenQuestionsForEditor() {
 async function saveQuestions() {
   try {
     await set(ref(db, 'questions'), editingQuestions);
+    // 削除した問題の写真も片付ける
+    const ids = new Set(editingQuestions.map(q => q.id));
+    const orphan = {};
+    Object.keys(mediaThumbs).forEach(qid => {
+      if (!ids.has(qid)) { orphan[`media/${qid}`] = null; orphan[`mediaThumbs/${qid}`] = null; }
+    });
+    if (Object.keys(orphan).length) await update(ref(db), orphan);
     const msg = document.getElementById('saveMsg');
     msg.style.display = 'block';
     setTimeout(() => msg.style.display = 'none', 2000);
@@ -266,6 +415,7 @@ function listenSession() {
       val.status === 'closed' ? '締切' :
       val.status === 'revealed' ? '結果発表' : '待機中';
     listenVotesForTally();
+    renderAllMediaStrips();
   });
 }
 
@@ -300,8 +450,7 @@ async function renderTallyForCurrentQuestion() {
   const q = currentQuestions[qIndex];
   const snap = await get(child(ref(db), `votes/${qIndex}`));
   const votes = snap.val() || {};
-  const counts = [0, 0, 0, 0];
-  Object.values(votes).forEach(v => { if (v >= 0 && v <= 3) counts[v]++; });
+  const counts = tallyVotes(votes);
   const total = counts.reduce((a, b) => a + b, 0);
   const showCorrect = currentSession.status === 'revealed' && q && (q.correctIndex === 0 || q.correctIndex > 0);
 
@@ -329,8 +478,7 @@ async function renderSummary() {
   for (let qi = 0; qi < currentQuestions.length; qi++) {
     const snap = await get(child(ref(db), `votes/${qi}`));
     const votes = snap.val() || {};
-    const counts = [0, 0, 0, 0];
-    Object.values(votes).forEach(v => { if (v >= 0 && v <= 3) counts[v]++; });
+    const counts = tallyVotes(votes);
     const total = counts.reduce((a, b) => a + b, 0);
     const topIndex = counts.indexOf(Math.max(...counts));
     const q = currentQuestions[qi];
@@ -343,35 +491,13 @@ async function renderSummary() {
 /* ---------- 正解ランキング ---------- */
 
 async function showRanking() {
-  const scores = {};
-  Object.keys(currentParticipants).forEach(uid => { scores[uid] = 0; });
-
-  for (let qi = 0; qi < currentQuestions.length; qi++) {
-    const q = currentQuestions[qi];
-    if (q.correctIndex !== 0 && !(q.correctIndex > 0)) continue; // 正解なしの問題はスキップ
-    const snap = await get(child(ref(db), `votes/${qi}`));
-    const votes = snap.val() || {};
-    Object.entries(votes).forEach(([uid, v]) => {
-      if (v === q.correctIndex) scores[uid] = (scores[uid] || 0) + 1;
-      else if (!(uid in scores)) scores[uid] = 0;
-    });
-  }
-
-  const rows = Object.keys(currentParticipants).map(uid => ({
-    nickname: currentParticipants[uid].nickname || '名無し',
-    score: scores[uid] || 0
-  }));
-  rows.sort((a, b) => b.score - a.score);
-
-  let rank = 0, prevScore = null;
+  const rows = await computeRanking(db, currentQuestions, currentParticipants);
   const list = document.getElementById('rankingList');
   list.innerHTML = '';
-  rows.forEach((r, i) => {
-    if (r.score !== prevScore) { rank = i + 1; prevScore = r.score; }
+  rows.forEach(r => {
     const li = document.createElement('li');
-    li.className = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : '';
-    const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}位`;
-    li.innerHTML = `<span class="rank-num">${medal}</span><span>${escapeHtml(r.nickname)}</span><span class="rank-score">${r.score}問正解</span>`;
+    li.className = r.rank <= 3 ? `rank-${r.rank}` : '';
+    li.innerHTML = `<span class="rank-num">${rankMedal(r.rank)}</span><span>${escapeHtml(r.nickname)}</span><span class="rank-score">${r.score}問正解</span>`;
     list.appendChild(li);
   });
   if (rows.length === 0) list.innerHTML = '<li>参加者がいません</li>';
@@ -381,13 +507,15 @@ async function showRanking() {
 
 async function resetAllData() {
   if (!confirm('本当に全データを削除しますか？この操作は取り消せません。')) return;
-  if (!confirm('最終確認：投票・参加者・抽選結果のすべてを削除します。よろしいですか？')) return;
+  if (!confirm('最終確認：問題・写真・投票・参加者のすべてを削除します。よろしいですか？')) return;
   try {
     await update(ref(db), {
-      session: { status: 'waiting', currentQuestionIndex: 0 },
+      session: { status: 'waiting', currentQuestionIndex: 0, screen: { mode: 'auto' } },
       questions: null,
       participants: null,
-      votes: null
+      votes: null,
+      media: null,
+      mediaThumbs: null
     });
     alert('データを削除しました。');
     location.reload();
@@ -396,11 +524,6 @@ async function resetAllData() {
   }
 }
 
-function escapeHtml(str) {
-  const d = document.createElement('div');
-  d.textContent = String(str ?? '');
-  return d.innerHTML;
-}
 function escapeAttr(str) {
   return String(str ?? '').replace(/"/g, '&quot;');
 }

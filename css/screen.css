@@ -1,0 +1,147 @@
+/* スクリーン（プロジェクター）用。16:9の全画面表示を想定し、文字サイズは画面の高さ基準 */
+
+body.screen-page { overflow: hidden; height: 100vh; }
+
+.stage {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 3.5vh 4vw 4vh;
+  gap: 3vh;
+}
+
+.stage-head { display: flex; align-items: center; gap: 1.2vw; flex: none; }
+.stage-eyebrow { font-size: 2.2vh; padding: 0.8vh 1.6vh; margin: 0; border-width: 0.4vh; }
+.stage-pill {
+  font-weight: 900; font-size: 2.6vh;
+  padding: 0.8vh 2vh; border-radius: 999px;
+  border: 0.4vh solid var(--ink); background: #fff; color: var(--ink);
+  box-shadow: 0.5vh 0.5vh 0 var(--ink);
+}
+.stage-pill.voting { background: var(--yellow); animation: pulse 1.4s ease-in-out infinite; }
+.stage-pill.closed { background: var(--red); color: #fff; }
+.stage-pill.revealed { background: var(--purple); color: #fff; }
+.stage-count { margin-left: auto; font-size: 3.4vh; background: var(--ink); color: #fff; }
+
+@keyframes pulse { 50% { transform: scale(1.06); } }
+
+.stage-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+.stage-title {
+  font-size: 7vh; color: #fff; text-shadow: 0.5vh 0.5vh 0 var(--ink); line-height: 1.3;
+}
+
+/* ---------- 問題・結果 ---------- */
+
+.stage-question {
+  font-size: 6vh; line-height: 1.35;
+  background: var(--cream); color: var(--ink);
+  border: 0.6vh solid var(--ink); border-radius: 3vh;
+  box-shadow: 1vh 1vh 0 var(--ink);
+  padding: 3vh 4vh;
+  flex: none;
+}
+
+.stage-options {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr;
+  gap: 3vh 2.5vw; margin-top: 4vh;
+}
+.stage-options.is-reveal { grid-template-columns: 1fr; gap: 2vh; }
+
+.stage-opt {
+  border: 0.6vh solid var(--ink); border-radius: 2.6vh;
+  box-shadow: 0.9vh 0.9vh 0 var(--ink);
+  color: #fff; padding: 2vh 3vh;
+  display: flex; flex-direction: column; justify-content: center; gap: 1.2vh;
+  min-height: 0;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.stage-opt.opt-0 { background: var(--red); }
+.stage-opt.opt-1 { background: var(--blue); }
+.stage-opt.opt-2 { background: var(--yellow); color: var(--ink); }
+.stage-opt.opt-3 { background: var(--green); }
+.stage-opt.is-dim { opacity: 0.4; }
+.stage-opt.is-correct { outline: 1.2vh solid #fff; outline-offset: -0.2vh; transform: scale(1.015); }
+
+.stage-opt-main { display: flex; align-items: center; gap: 2.5vh; }
+.stage-badge {
+  flex: none; width: 7vh; height: 7vh; border-radius: 50%;
+  background: #fff; color: var(--ink); border: 0.4vh solid var(--ink);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Mochiy Pop One', sans-serif; font-size: 4vh;
+}
+.stage-opt-text { font-size: 5vh; font-weight: 900; line-height: 1.3; }
+.is-reveal .stage-badge { width: 5.5vh; height: 5.5vh; font-size: 3vh; }
+.is-reveal .stage-opt-text { font-size: 3.8vh; }
+.stage-correct {
+  margin-left: auto; flex: none;
+  background: #fff; color: var(--pink-deep);
+  border: 0.4vh solid var(--ink); border-radius: 999px;
+  padding: 0.6vh 2vh; font-size: 3.2vh; font-weight: 900;
+}
+
+.stage-bar { display: flex; align-items: center; gap: 2vh; }
+.stage-bar-track {
+  flex: 1; height: 3.6vh; background: rgba(255,255,255,0.85);
+  border: 0.4vh solid var(--ink); border-radius: 1.2vh; overflow: hidden;
+}
+.stage-bar-fill { height: 100%; width: 0; background: var(--ink); transition: width 1.2s cubic-bezier(.2,.8,.2,1); }
+.stage-bar-num { flex: none; min-width: 22vh; text-align: right; font-size: 3.4vh; font-weight: 900; }
+
+/* ---------- 参加QR ---------- */
+
+.join-wrap { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6vw; }
+.join-lead { font-size: 4.4vh; font-weight: 900; color: #fff; text-shadow: 0.4vh 0.4vh 0 var(--ink); line-height: 1.5; margin: 3vh 0; }
+.join-url { font-size: 2.4vh; font-weight: 700; color: var(--ink); background: rgba(255,255,255,0.85); display: inline-block; padding: 0.8vh 1.6vh; border-radius: 1vh; margin: 0; }
+.join-count { font-size: 4vh; font-weight: 900; color: #fff; text-shadow: 0.4vh 0.4vh 0 var(--ink); margin: 4vh 0 0; }
+.join-count b { font-size: 9vh; font-family: 'Mochiy Pop One', sans-serif; margin: 0 1vh; }
+.join-qr {
+  background: #fff; border: 0.6vh solid var(--ink); border-radius: 3vh;
+  box-shadow: 1vh 1vh 0 var(--ink); padding: 2vh; flex: none;
+}
+.join-qr img { display: block; width: 55vh; height: 55vh; image-rendering: pixelated; }
+
+/* ---------- 写真 ---------- */
+
+.photo-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.photo-wrap img {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+  border: 0.8vh solid #fff; border-radius: 2vh; box-shadow: 1.2vh 1.2vh 0 var(--ink);
+  animation: photoIn 0.6s ease;
+}
+.photo-loading { font-size: 4vh; font-weight: 900; color: #fff; text-shadow: 0.4vh 0.4vh 0 var(--ink); }
+@keyframes photoIn { from { opacity: 0; transform: scale(0.94); } }
+
+/* ---------- ランキング ---------- */
+
+.stage-ranking {
+  list-style: none; margin: 3vh 0 0; padding: 0;
+  display: grid; grid-template-columns: 1fr 1fr; grid-auto-flow: column; grid-template-rows: repeat(5, 1fr);
+  gap: 2vh 2.5vw; flex: 1; min-height: 0;
+}
+.stage-ranking li {
+  display: flex; align-items: center; gap: 2vh;
+  background: #fff; border: 0.5vh solid var(--ink); border-radius: 2vh;
+  box-shadow: 0.7vh 0.7vh 0 var(--ink);
+  padding: 0 3vh; font-weight: 900; font-size: 3.6vh;
+  opacity: 0; animation: rankIn 0.5s ease forwards;
+}
+.stage-ranking li.rank-1 { background: #FFE8A3; }
+.stage-ranking li.rank-2 { background: #EFEFEF; }
+.stage-ranking li.rank-3 { background: #F3D8BC; }
+.stage-ranking .rank-num { min-width: 8vh; font-size: 4.4vh; }
+.stage-ranking .rank-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage-ranking .rank-score { margin-left: auto; color: var(--pink-deep); flex: none; }
+@keyframes rankIn { from { opacity: 0; transform: translateY(2vh); } to { opacity: 1; transform: none; } }
+
+/* ---------- 全画面ボタン・プレビュー ---------- */
+
+.fs-btn {
+  position: fixed; right: 2vw; bottom: 2vh; z-index: 1000;
+  font-size: 14px; padding: 8px 14px; transition: opacity 0.3s ease;
+}
+body.idle .fs-btn { opacity: 0; pointer-events: none; }
+body.idle { cursor: none; }
+
+body.is-preview .stage-ranking li, body.is-preview .photo-wrap img { animation: none; opacity: 1; }

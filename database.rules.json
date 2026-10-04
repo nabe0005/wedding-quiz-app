@@ -2,14 +2,12 @@
   "rules": {
     ".read": false,
     ".write": false,
-
     "adminConfig": {
       "password": {
         ".read": false,
         ".write": false
       }
     },
-
     "hostClaim": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
@@ -17,17 +15,22 @@
         ".validate": "newData.isString()"
       }
     },
-
     "session": {
       ".read": "auth != null",
       ".write": "auth != null && root.child('hostClaim').child(auth.uid).exists()"
     },
-
     "questions": {
       ".read": "auth != null",
       ".write": "auth != null && root.child('hostClaim').child(auth.uid).exists()"
     },
-
+    "media": {
+      ".read": "auth != null && root.child('hostClaim').child(auth.uid).exists()",
+      ".write": "auth != null && root.child('hostClaim').child(auth.uid).exists()"
+    },
+    "mediaThumbs": {
+      ".read": "auth != null && root.child('hostClaim').child(auth.uid).exists()",
+      ".write": "auth != null && root.child('hostClaim').child(auth.uid).exists()"
+    },
     "participants": {
       ".read": "auth != null",
       ".write": "auth != null && root.child('hostClaim').child(auth.uid).exists()",
@@ -36,7 +39,6 @@
         ".validate": "newData.hasChildren(['joinedAt'])"
       }
     },
-
     "votes": {
       ".read": "auth != null && root.child('session/status').val() === 'revealed'",
       ".write": "auth != null && root.child('hostClaim').child(auth.uid).exists()",
