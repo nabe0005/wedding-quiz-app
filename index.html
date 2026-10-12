@@ -65,6 +65,7 @@ let currentQuestions = [];
 let hasVotedThisQuestion = false;
 
 const alreadyJoined = localStorage.getItem('wq_joined') === '1';
+let joined = alreadyJoined;
 
 onAuthStateChanged(auth, (user) => {
   if (!user) return;
@@ -87,7 +88,9 @@ joinBtn.addEventListener('click', async () => {
     await set(ref(db, `participants/${myUid}`), { nickname, joinedAt: Date.now(), won: false });
     localStorage.setItem('wq_nickname', nickname);
     localStorage.setItem('wq_joined', '1');
+    joined = true;
     showVoteScreen();
+    renderQuestionState();
   } catch (e) {
     alert('参加処理に失敗しました。もう一度お試しください。');
     joinBtn.disabled = false;
@@ -124,6 +127,13 @@ async function renderQuestionState() {
     currentSession.status === 'revealed' ? '結果発表' : '待機中';
 
   const q = currentQuestions[qIndex];
+
+  // 参加（名前の入力）前は問題のカードを出さない
+  if (!joined) {
+    voteScreen.style.display = 'none';
+    doneMsg.style.display = 'none';
+    return;
+  }
 
   const voteSnap = await get(child(ref(db), `votes/${qIndex}/${myUid}`));
   hasVotedThisQuestion = voteSnap.exists();
