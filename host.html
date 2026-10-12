@@ -49,6 +49,7 @@
     <div id="questionEditors"></div>
     <button id="addQuestionBtn" class="btn-secondary btn-block" style="margin-top:14px;">＋ 問題を追加</button>
     <button id="saveQuestionsBtn" class="btn-primary btn-block" style="margin-top:10px;">この内容を保存</button>
+    <button id="loadDefaultsBtn" class="btn-secondary btn-block" style="margin-top:10px;">初期問題を読み込む（8問）</button>
     <p class="small-note" id="saveMsg" style="display:none; color:var(--pink-deep);">保存しました。</p>
   </div>
 
@@ -94,7 +95,7 @@
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { tallyVotes, computeRanking, rankMedal, newQuestionId, compressImage, escapeHtml } from './js/quiz-utils.js';
+import { tallyVotes, computeRanking, rankMedal, newQuestionId, defaultQuestions, compressImage, escapeHtml } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, update, onValue, child, push, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -149,6 +150,7 @@ function initHostDashboard() {
   document.getElementById('nextBtn').onclick = (e) => { flashButton(e.currentTarget); onNextQuestion(); };
   document.getElementById('saveQuestionsBtn').onclick = (e) => { flashButton(e.currentTarget); saveQuestions(); };
   document.getElementById('addQuestionBtn').onclick = (e) => { flashButton(e.currentTarget); addQuestion(); };
+  document.getElementById('loadDefaultsBtn').onclick = (e) => { flashButton(e.currentTarget); loadDefaultQuestions(); };
   document.getElementById('rankingBtn').onclick = (e) => { flashButton(e.currentTarget); showRanking(); };
   document.getElementById('resetBtn').onclick = (e) => { flashButton(e.currentTarget); resetAllData(); };
 }
@@ -293,10 +295,10 @@ function buildQuestionEditors() {
     box.className = 'question-edit-block';
     box.innerHTML = `
       <div class="qe-header">
-        <label>第${i + 1}問 - 問題文</label>
+        <label>第${i + 1}問 - 問題文${q.correctIndex === null && !q.noCorrect ? ' <span class="qe-unset">正解が未設定</span>' : ''}</label>
         <button type="button" class="qe-remove" data-idx="${i}">× 削除</button>
       </div>
-      <input type="text" class="qe-text" data-idx="${i}" value="${escapeAttr(q.text || '')}" placeholder="例：新郎の小学生時代の習い事は？">
+      <input type="text" class="qe-text" data-idx="${i}" value="${escapeAttr(q.text || '')}" placeholder="例：【過去編】新郎の小学生時代の習い事は？">
       <div style="margin-top:8px;">
         ${[0, 1, 2, 3].map(j => `
           <div class="qe-option-row">
@@ -308,7 +310,7 @@ function buildQuestionEditors() {
           </div>
         `).join('')}
         <label class="qe-correct-label qe-correct-none">
-          <input type="radio" name="correct-${i}" class="qe-correct-none-radio" data-idx="${i}" ${q.correctIndex === null || q.correctIndex === undefined ? 'checked' : ''}>
+          <input type="radio" name="correct-${i}" class="qe-correct-none-radio" data-idx="${i}" ${q.noCorrect ? 'checked' : ''}>
           正解なし（予想・未来の問題など）
         </label>
       </div>
@@ -341,10 +343,16 @@ function buildQuestionEditors() {
     editingQuestions[idx].options[opt] = e.target.value;
   }));
   container.querySelectorAll('.qe-correct').forEach(el => el.addEventListener('change', e => {
-    editingQuestions[+e.target.dataset.idx].correctIndex = +e.target.dataset.opt;
+    const q = editingQuestions[+e.target.dataset.idx];
+    q.correctIndex = +e.target.dataset.opt;
+    q.noCorrect = false;
+    e.target.closest('.question-edit-block').querySelector('.qe-unset')?.remove();
   }));
   container.querySelectorAll('.qe-correct-none-radio').forEach(el => el.addEventListener('change', e => {
-    editingQuestions[+e.target.dataset.idx].correctIndex = null;
+    const q = editingQuestions[+e.target.dataset.idx];
+    q.correctIndex = null;
+    q.noCorrect = true;
+    e.target.closest('.question-edit-block').querySelector('.qe-unset')?.remove();
   }));
   container.querySelectorAll('.qe-remove').forEach(el => el.addEventListener('click', e => {
     const idx = +e.target.dataset.idx;
@@ -354,7 +362,14 @@ function buildQuestionEditors() {
 }
 
 function blankQuestion() {
-  return { id: newQuestionId(), text: '', options: ['', '', '', ''], correctIndex: null };
+  return { id: newQuestionId(), text: '', options: ['', '', '', ''], correctIndex: null, noCorrect: false };
+}
+
+function loadDefaultQuestions() {
+  if (!confirm('編集欄を初期問題（8問）に置き換えますか？\n\n・いま入力中の問題・選択肢・正解は消えます\n・「この内容を保存」を押すまでは参加者・スクリーンには反映されません\n・保存すると、いまの問題に登録した写真も削除されます')) return;
+  editingQuestions = defaultQuestions();
+  buildQuestionEditors();
+  showToast('初期問題を読み込みました。確認して「この内容を保存」を押してください');
 }
 
 function addQuestion() {
@@ -374,9 +389,11 @@ function listenQuestionsForEditor() {
       id: q.id,
       text: q.text || '',
       options: (q.options && q.options.length === 4) ? [...q.options] : ['', '', '', ''],
-      correctIndex: (q.correctIndex === 0 || q.correctIndex > 0) ? q.correctIndex : null
+      correctIndex: (q.correctIndex === 0 || q.correctIndex > 0) ? q.correctIndex : null,
+      noCorrect: q.noCorrect === true
     }));
-    if (editingQuestions.length === 0) editingQuestions.push(blankQuestion());
+    // まだ1問も保存されていなければ、本番用の初期問題を編集欄に出す（保存するまでDBには入らない）
+    if (editingQuestions.length === 0) editingQuestions = defaultQuestions();
     buildQuestionEditors();
     renderTallyForCurrentQuestion();
     renderSummary();

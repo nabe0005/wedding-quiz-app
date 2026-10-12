@@ -273,3 +273,17 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border: 3px solid var(--ink); border-radius: 12px; padding: 8px 14px;
   background: #fff; font-size: 13px; font-weight: 900; box-shadow: 3px 3px 0 var(--ink);
 }
+
+/* 過去編・現在編・未来編ラベル */
+.category-label {
+  display: inline-block; margin-top: 14px;
+  font-family: 'Mochiy Pop One', 'Noto Sans JP', sans-serif; font-size: 15px; letter-spacing: 0.08em;
+  color: #fff; padding: 6px 16px; border-radius: 999px;
+  border: 3px solid var(--ink); box-shadow: 3px 3px 0 var(--ink);
+  background: var(--ink);
+}
+.category-label.cat-past { background: #8C6FF0; }
+.category-label.cat-present { background: #E8477F; }
+.category-label.cat-future { background: #13A89E; }
+
+.qe-unset { margin-left: 6px; font-size: 11px; color: #fff; background: var(--red); padding: 2px 8px; border-radius: 999px; }

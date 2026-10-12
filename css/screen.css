@@ -145,3 +145,8 @@ body.idle .fs-btn { opacity: 0; pointer-events: none; }
 body.idle { cursor: none; }
 
 body.is-preview .stage-ranking li, body.is-preview .photo-wrap img { animation: none; opacity: 1; }
+
+.stage-question .category-label {
+  display: block; width: fit-content; margin: 0 0 1.6vh;
+  font-size: 3.2vh; padding: 0.6vh 2.6vh; border-width: 0.4vh; box-shadow: 0.5vh 0.5vh 0 var(--ink);
+}

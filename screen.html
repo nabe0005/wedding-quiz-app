@@ -33,7 +33,7 @@
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { OPTION_LABELS, hasCorrect, tallyVotes, computeRanking, rankMedal, escapeHtml } from './js/quiz-utils.js';
+import { OPTION_LABELS, hasCorrect, tallyVotes, computeRanking, rankMedal, splitCategory, escapeHtml } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -220,8 +220,9 @@ function buildQuestion(reveal) {
   if (!q) { buildJoin(); return; }
   const showCorrect = reveal && hasCorrect(q);
   const opts = (q.options || []).map((t, i) => ({ t, i })).filter(o => o.t);
+  const { category, categoryClass, body } = splitCategory(q.text);
   stageBody.innerHTML = `
-    <h1 class="stage-question">${escapeHtml(q.text || '')}</h1>
+    <h1 class="stage-question">${category ? `<span class="category-label ${categoryClass}">${escapeHtml(category)}</span>` : ''}${escapeHtml(body)}</h1>
     <div class="stage-options ${reveal ? 'is-reveal' : ''}">
       ${opts.map(({ t, i }) => {
         const correct = showCorrect && q.correctIndex === i;

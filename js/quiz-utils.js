@@ -5,6 +5,33 @@ import { ref, get, child } from "https://www.gstatic.com/firebasejs/10.12.2/fire
 
 export const OPTION_LABELS = 'ABCD';
 
+// 本番用の初期問題。選択肢と1〜6問目の正解は司会者画面で入力する
+const DEFAULT_QUESTION_TEXTS = [
+  ['【過去編】新郎の子どもの頃の将来の夢は？', false],
+  ['【過去編】新婦の子どもの頃の将来の夢は？', false],
+  ['【過去編】新郎の初めてのアルバイトは？', false],
+  ['【過去編】新婦の初めてのアルバイトは？', false],
+  ['【現在編】新郎の家での担当家事は？', false],
+  ['【現在編】新婦の家での担当家事は？', false],
+  ['【未来編】10年後、新郎はどんな見た目になっている？', true],
+  ['【未来編】10年後、新婦が休日に夢中になっている趣味は？', true]
+];
+
+// correctIndex: 正解の番号（未設定・正解なしは null）、noCorrect: 「正解なし」を選んだ問題
+export function defaultQuestions() {
+  return DEFAULT_QUESTION_TEXTS.map(([text, noCorrect]) => ({
+    id: newQuestionId(), text, options: ['', '', '', ''], correctIndex: null, noCorrect
+  }));
+}
+
+// 「【過去編】…」の先頭ラベルを分ける
+const CATEGORY_CLASSES = { '過去編': 'cat-past', '現在編': 'cat-present', '未来編': 'cat-future' };
+export function splitCategory(text) {
+  const m = String(text || '').match(/^【(.+?)】\s*/);
+  if (!m) return { category: '', categoryClass: '', body: text || '' };
+  return { category: m[1], categoryClass: CATEGORY_CLASSES[m[1]] || 'cat-other', body: text.slice(m[0].length) };
+}
+
 export function hasCorrect(q) {
   return !!q && (q.correctIndex === 0 || q.correctIndex > 0);
 }

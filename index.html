@@ -24,6 +24,7 @@
         <span class="status-pill" id="questionCounter">第1問</span>
         <span class="status-pill" id="statusPill">待機中</span>
       </div>
+      <span class="category-label" id="categoryLabel" style="display:none;"></span>
       <h2 class="title" id="questionText" style="margin-top:14px; font-size:19px; color:var(--ink); text-shadow:none;">問題を待っています…</h2>
 
       <div class="option-grid" id="optionGrid"></div>
@@ -38,6 +39,7 @@
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
+import { splitCategory } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, onValue, child } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -52,6 +54,7 @@ const doneMsg = document.getElementById('doneMsg');
 const nicknameInput = document.getElementById('nicknameInput');
 const joinBtn = document.getElementById('joinBtn');
 const questionText = document.getElementById('questionText');
+const categoryLabel = document.getElementById('categoryLabel');
 const optionGrid = document.getElementById('optionGrid');
 const statusPill = document.getElementById('statusPill');
 const questionCounter = document.getElementById('questionCounter');
@@ -135,6 +138,7 @@ async function renderQuestionState() {
   }
 
   if (!q || currentSession.status !== 'voting') {
+    categoryLabel.style.display = 'none';
     questionText.textContent = currentSession.status === 'closed'
       ? '締め切りました。結果をお待ちください…'
       : '次の問題をお待ちください…';
@@ -142,7 +146,11 @@ async function renderQuestionState() {
     return;
   }
 
-  questionText.textContent = q.text || '';
+  const { category, categoryClass, body } = splitCategory(q.text);
+  categoryLabel.textContent = category;
+  categoryLabel.className = 'category-label ' + categoryClass;
+  categoryLabel.style.display = category ? '' : 'none';
+  questionText.textContent = body;
   optionGrid.innerHTML = '';
   (q.options || []).forEach((optText, i) => {
     const btn = document.createElement('button');
