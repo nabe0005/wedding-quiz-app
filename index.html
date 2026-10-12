@@ -87,6 +87,7 @@ onAuthStateChanged(auth, (user) => {
   if (alreadyJoined) showVoteScreen();
   listenSession();
   listenQuestions();
+  listenMyParticipant();
 });
 
 signInAnonymously(auth).catch((err) => {
@@ -111,6 +112,21 @@ joinBtn.addEventListener('click', async () => {
     console.error(e);
   }
 });
+
+// 司会者が参加者データを削除したら、名前の入力からやり直してもらう
+function listenMyParticipant() {
+  onValue(ref(db, `participants/${myUid}`), (snap) => {
+    if (snap.exists() || !joined) return;
+    joined = false;
+    localStorage.removeItem('wq_joined');
+    voteScreen.style.display = 'none';
+    doneMsg.style.display = 'none';
+    nameBar.style.display = 'none';
+    joinScreen.style.display = 'block';
+    joinBtn.disabled = false;
+    nicknameInput.value = localStorage.getItem('wq_nickname') || '';
+  });
+}
 
 function showVoteScreen() {
   joinScreen.style.display = 'none';

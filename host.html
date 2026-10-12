@@ -87,9 +87,15 @@
   </div>
 
   <div class="card">
+    <h3 style="font-size:16px;">リハーサル後のリセット</h3>
+    <p class="small-note">投票と参加者だけを削除し、第1問の待機中に戻します。問題・選択肢・正解・写真は残ります。参加者のスマホは名前の入力画面に戻ります（元に戻せません）。</p>
+    <button id="resetVotesBtn" class="btn-secondary btn-block" style="margin-top:10px;">投票・参加者だけ削除（問題と写真は残す）</button>
+  </div>
+
+  <div class="card">
     <h3 style="font-size:16px; color:var(--red);">終了処理</h3>
     <p class="small-note">余興終了後、問題・写真・投票・参加者データを完全に削除します（元に戻せません）。</p>
-    <button id="resetBtn" class="btn-danger btn-block">投票データを全削除する</button>
+    <button id="resetBtn" class="btn-danger btn-block">全データを削除する（問題・写真も消えます）</button>
   </div>
 </div>
 
@@ -153,6 +159,7 @@ function initHostDashboard() {
   document.getElementById('loadDefaultsBtn').onclick = (e) => { flashButton(e.currentTarget); loadDefaultQuestions(); };
   document.getElementById('rankingBtn').onclick = (e) => { flashButton(e.currentTarget); showRanking(); };
   document.getElementById('resetBtn').onclick = (e) => { flashButton(e.currentTarget); resetAllData(); };
+  document.getElementById('resetVotesBtn').onclick = (e) => { flashButton(e.currentTarget); resetVotesOnly(); };
 }
 
 function flashButton(el) {
@@ -521,7 +528,22 @@ async function showRanking() {
   if (rows.length === 0) list.innerHTML = '<li>参加者がいません</li>';
 }
 
-/* ---------- 終了処理 ---------- */
+/* ---------- リハーサル後のリセット・終了処理 ---------- */
+
+async function resetVotesOnly() {
+  if (!confirm('投票と参加者を削除して、第1問の待機中に戻しますか？\n（問題・選択肢・正解・写真は残ります。取り消せません）')) return;
+  try {
+    await update(ref(db), {
+      session: { status: 'waiting', currentQuestionIndex: 0, screen: { mode: 'auto' } },
+      participants: null,
+      votes: null
+    });
+    document.getElementById('rankingList').innerHTML = '';
+    showToast('投票・参加者を削除しました');
+  } catch (e) {
+    alert('削除に失敗しました: ' + e.message);
+  }
+}
 
 async function resetAllData() {
   if (!confirm('本当に全データを削除しますか？この操作は取り消せません。')) return;
