@@ -18,6 +18,20 @@
     <p class="small-note">個人情報の入力は不要です。名前は順位発表にのみ使われます。</p>
   </div>
 
+  <div id="nameBar" class="name-bar" style="display:none;">
+    <div id="nameView" class="name-view">
+      <span>参加名：<b id="nameText"></b></span>
+      <button type="button" id="nameEditBtn" class="name-edit-btn">✎ 変更</button>
+    </div>
+    <div id="nameEdit" style="display:none;">
+      <input type="text" id="nameInput" maxlength="20" placeholder="新しいお名前・ニックネーム">
+      <div class="row" style="margin-top:10px;">
+        <button type="button" id="nameCancelBtn" class="btn-secondary">やめる</button>
+        <button type="button" id="nameSaveBtn" class="btn-primary">変更する</button>
+      </div>
+    </div>
+  </div>
+
   <div id="voteScreen" style="display:none;">
     <div class="card">
       <div class="row" style="align-items:center;">
@@ -42,7 +56,7 @@ import { firebaseConfig } from './js/firebase-config.js';
 import { splitCategory } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getDatabase, ref, set, get, onValue, child } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getDatabase, ref, set, get, update, onValue, child } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -98,7 +112,55 @@ joinBtn.addEventListener('click', async () => {
   }
 });
 
-function showVoteScreen() { joinScreen.style.display = 'none'; voteScreen.style.display = 'block'; }
+function showVoteScreen() {
+  joinScreen.style.display = 'none';
+  voteScreen.style.display = 'block';
+  showNameBar();
+}
+
+/* ---------- 参加後のニックネーム変更 ---------- */
+
+const nameBar = document.getElementById('nameBar');
+const nameView = document.getElementById('nameView');
+const nameEdit = document.getElementById('nameEdit');
+const nameInput = document.getElementById('nameInput');
+const nameSaveBtn = document.getElementById('nameSaveBtn');
+
+function showNameBar() {
+  document.getElementById('nameText').textContent = localStorage.getItem('wq_nickname') || '（未設定）';
+  nameBar.style.display = 'block';
+  nameView.style.display = 'flex';
+  nameEdit.style.display = 'none';
+}
+
+document.getElementById('nameEditBtn').addEventListener('click', () => {
+  nameInput.value = localStorage.getItem('wq_nickname') || '';
+  nameView.style.display = 'none';
+  nameEdit.style.display = 'block';
+  nameInput.focus();
+});
+document.getElementById('nameCancelBtn').addEventListener('click', showNameBar);
+
+nameSaveBtn.addEventListener('click', async () => {
+  const nickname = nameInput.value.trim();
+  if (!nickname) { alert('お名前を入力してください。'); return; }
+  if (!myUid) { alert('接続中です。数秒待って再度お試しください。'); return; }
+  nameSaveBtn.disabled = true;
+  try {
+    const path = `participants/${myUid}`;
+    const snap = await get(ref(db, path));
+    // 司会者がデータを削除した後などで登録が消えていたら、参加し直す形で登録する
+    if (snap.exists()) await update(ref(db, path), { nickname });
+    else await set(ref(db, path), { nickname, joinedAt: Date.now(), won: false });
+    localStorage.setItem('wq_nickname', nickname);
+    showNameBar();
+  } catch (e) {
+    alert('名前の変更に失敗しました。もう一度お試しください。');
+    console.error(e);
+  } finally {
+    nameSaveBtn.disabled = false;
+  }
+});
 
 function listenSession() {
   onValue(ref(db, 'session'), (snap) => {
