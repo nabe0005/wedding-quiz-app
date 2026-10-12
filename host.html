@@ -95,7 +95,7 @@
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { tallyVotes, computeRanking, rankMedal, newQuestionId, defaultQuestions, compressImage, escapeHtml } from './js/quiz-utils.js';
+import { tallyVotes, scoringOptions, computeRanking, rankMedal, newQuestionId, defaultQuestions, compressImage, escapeHtml } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, update, onValue, child, push, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -311,7 +311,7 @@ function buildQuestionEditors() {
         `).join('')}
         <label class="qe-correct-label qe-correct-none">
           <input type="radio" name="correct-${i}" class="qe-correct-none-radio" data-idx="${i}" ${q.noCorrect ? 'checked' : ''}>
-          正解なし（予想・未来の問題など）
+          正解なし（未来編など。最多票に投票した人に1点）
         </label>
       </div>
       <div class="qe-media-area">
@@ -469,18 +469,19 @@ async function renderTallyForCurrentQuestion() {
   const votes = snap.val() || {};
   const counts = tallyVotes(votes);
   const total = counts.reduce((a, b) => a + b, 0);
-  const showCorrect = currentSession.status === 'revealed' && q && (q.correctIndex === 0 || q.correctIndex > 0);
+  const winners = currentSession.status === 'revealed' ? scoringOptions(q, counts) : [];
+  const badge = q?.noCorrect ? '★最多票（加点）' : '★正解';
 
   const area = document.getElementById('tallyArea');
   area.innerHTML = '';
   for (let i = 0; i < 4; i++) {
     const pct = total > 0 ? Math.round((counts[i] / total) * 100) : 0;
     const optText = q?.options?.[i] || `選択肢${'ABCD'[i]}`;
-    const isCorrect = showCorrect && q.correctIndex === i;
+    const isCorrect = winners.includes(i);
     const row = document.createElement('div');
     row.className = 'bar-row' + (isCorrect ? ' correct-answer' : '');
     row.innerHTML = `
-      <div class="bar-label"><span>${'ABCD'[i]}. ${escapeHtml(optText)}${isCorrect ? '<span class="correct-badge">★正解</span>' : ''}</span><span>${counts[i]}票（${pct}%）</span></div>
+      <div class="bar-label"><span>${'ABCD'[i]}. ${escapeHtml(optText)}${isCorrect ? `<span class="correct-badge">${badge}</span>` : ''}</span><span>${counts[i]}票（${pct}%）</span></div>
       <div class="bar-track"><div class="bar-fill opt-${i}" style="width:${pct}%;"></div></div>
     `;
     area.appendChild(row);
@@ -514,7 +515,7 @@ async function showRanking() {
   rows.forEach(r => {
     const li = document.createElement('li');
     li.className = r.rank <= 3 ? `rank-${r.rank}` : '';
-    li.innerHTML = `<span class="rank-num">${rankMedal(r.rank)}</span><span>${escapeHtml(r.nickname)}</span><span class="rank-score">${r.score}問正解</span>`;
+    li.innerHTML = `<span class="rank-num">${rankMedal(r.rank)}</span><span>${escapeHtml(r.nickname)}</span><span class="rank-score">${r.score}点</span>`;
     list.appendChild(li);
   });
   if (rows.length === 0) list.innerHTML = '<li>参加者がいません</li>';

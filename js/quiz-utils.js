@@ -43,17 +43,29 @@ export function tallyVotes(votes) {
   return counts;
 }
 
-// 正解数で並べたランキング（同点は同順位）
+// 1点もらえる選択肢の番号。正解ありならその1つ、正解なし（未来編など）なら最多票の選択肢（同数はすべて）。
+// 正解が未設定の問題や、まだ投票がない正解なしの問題は空配列
+export function scoringOptions(q, counts) {
+  if (hasCorrect(q)) return [q.correctIndex];
+  if (!q || !q.noCorrect) return [];
+  const max = Math.max(...counts);
+  if (max === 0) return [];
+  return counts.map((c, i) => (c === max ? i : -1)).filter(i => i >= 0);
+}
+
+// 得点（正解 or 最多票で1点）で並べたランキング（同点は同順位）
 export async function computeRanking(db, questions, participants) {
   const scores = {};
   Object.keys(participants).forEach(uid => { scores[uid] = 0; });
 
   for (let qi = 0; qi < questions.length; qi++) {
     const q = questions[qi];
-    if (!hasCorrect(q)) continue; // 正解なしの問題はスキップ
+    if (!hasCorrect(q) && !q?.noCorrect) continue; // 正解が未設定の問題はスキップ
     const snap = await get(child(ref(db), `votes/${qi}`));
-    Object.entries(snap.val() || {}).forEach(([uid, v]) => {
-      if (v === q.correctIndex) scores[uid] = (scores[uid] || 0) + 1;
+    const votes = snap.val() || {};
+    const winners = scoringOptions(q, tallyVotes(votes));
+    Object.entries(votes).forEach(([uid, v]) => {
+      if (winners.includes(v)) scores[uid] = (scores[uid] || 0) + 1;
     });
   }
 

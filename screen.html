@@ -33,7 +33,7 @@
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { OPTION_LABELS, hasCorrect, tallyVotes, computeRanking, rankMedal, splitCategory, escapeHtml } from './js/quiz-utils.js';
+import { OPTION_LABELS, scoringOptions, tallyVotes, computeRanking, rankMedal, splitCategory, escapeHtml } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -144,7 +144,9 @@ function render() {
   if (!started) return;
   const view = currentView();
   const scr = session.screen || {};
-  const key = [view, session.currentQuestionIndex, view === 'question' ? '' : session.status, scr.qid, scr.photoKey, scr.at].join('|');
+  // 正解なしの問題は最多票がハイライトされるので、票が届いて最多が変わったら描き直す
+  const winners = view === 'reveal' ? currentWinners().join(',') : '';
+  const key = [view, session.currentQuestionIndex, view === 'question' ? '' : session.status, scr.qid, scr.photoKey, scr.at, winners].join('|');
 
   if (key !== viewKey) {
     const prevView = viewKey ? viewKey.split('|')[0] : null;
@@ -215,24 +217,30 @@ function buildJoin() {
     </div>`;
 }
 
+function currentWinners() {
+  return scoringOptions(questions[session.currentQuestionIndex], tallyVotes(votes));
+}
+
 function buildQuestion(reveal) {
   const q = questions[session.currentQuestionIndex];
   if (!q) { buildJoin(); return; }
-  const showCorrect = reveal && hasCorrect(q);
+  const winners = reveal ? currentWinners() : [];
+  const showCorrect = winners.length > 0;
+  const badge = q.noCorrect ? '★最多票（加点）' : '★正解';
   const opts = (q.options || []).map((t, i) => ({ t, i })).filter(o => o.t);
   const { category, categoryClass, body } = splitCategory(q.text);
   stageBody.innerHTML = `
     <h1 class="stage-question">${category ? `<span class="category-label ${categoryClass}">${escapeHtml(category)}</span>` : ''}${escapeHtml(body)}</h1>
     <div class="stage-options ${reveal ? 'is-reveal' : ''}">
       ${opts.map(({ t, i }) => {
-        const correct = showCorrect && q.correctIndex === i;
+        const correct = winners.includes(i);
         const dim = showCorrect && !correct;
         return `
         <div class="stage-opt opt-${i} ${correct ? 'is-correct' : ''} ${dim ? 'is-dim' : ''}">
           <div class="stage-opt-main">
             <span class="stage-badge">${OPTION_LABELS[i]}</span>
             <span class="stage-opt-text">${escapeHtml(t)}</span>
-            ${correct ? '<span class="stage-correct">★正解</span>' : ''}
+            ${correct ? `<span class="stage-correct">${badge}</span>` : ''}
           </div>
           ${reveal ? `
           <div class="stage-bar">
@@ -267,7 +275,7 @@ async function buildRanking() {
     <li class="${r.rank <= 3 ? 'rank-' + r.rank : ''}" style="animation-delay:${(rows.length - 1 - i) * 0.6}s">
       <span class="rank-num">${rankMedal(r.rank)}</span>
       <span class="rank-name">${escapeHtml(r.nickname)}</span>
-      <span class="rank-score">${r.score}問正解</span>
+      <span class="rank-score">${r.score}点</span>
     </li>`).join('');
 }
 
