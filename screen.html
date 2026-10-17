@@ -33,7 +33,7 @@
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { OPTION_LABELS, scoringOptions, tallyVotes, computeRanking, rankMedal, splitCategory, escapeHtml } from './js/quiz-utils.js';
+import { OPTION_LABELS, scoringOptions, tallyVotes, computeRanking, splitCategory, escapeHtml } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -55,6 +55,7 @@ let questions = [];
 let participants = {};
 let votes = {};
 let viewKey = null;
+let buildId = 0; // 表示を作り直すたびに増やす。途中の演出はこれが変わったら止める
 
 signInAnonymously(auth).catch(e => console.error(e));
 onAuthStateChanged(auth, async (user) => {
@@ -151,6 +152,7 @@ function render() {
   if (key !== viewKey) {
     const prevView = viewKey ? viewKey.split('|')[0] : null;
     viewKey = key;
+    buildId++;
     stageBody.className = 'stage-body view-' + view;
     if (view === 'join') buildJoin();
     else if (view === 'photo') buildPhoto(scr);
@@ -254,9 +256,9 @@ function buildQuestion(reveal) {
 
 async function buildPhoto(scr) {
   stageBody.innerHTML = '<div class="photo-wrap"><p class="photo-loading">写真を読み込み中…</p></div>';
-  const myKey = viewKey;
+  const myBuild = buildId;
   const snap = await get(ref(db, `media/${scr.qid}/${scr.photoKey}`)).catch(() => null);
-  if (viewKey !== myKey) return; // 読み込み中に表示が切り替わった
+  if (buildId !== myBuild) return; // 読み込み中に表示が切り替わった
   const data = snap && snap.val();
   if (!data) {
     stageBody.innerHTML = '<div class="photo-wrap"><p class="photo-loading">写真が見つかりませんでした</p></div>';
@@ -266,9 +268,9 @@ async function buildPhoto(scr) {
   const q = questions.find(x => x && x.id === scr.qid);
   if (q && q.noCorrect && !isPreview) {
     const prompt = await photoPrompt(q, scr);
-    if (viewKey !== myKey) return;
-    await playGeneration(data, prompt, myKey);
-    if (viewKey !== myKey) return;
+    if (buildId !== myBuild) return;
+    await playGeneration(data, prompt, myBuild);
+    if (buildId !== myBuild) return;
   }
   stageBody.innerHTML = `<div class="photo-wrap"><img src="${data}" alt=""></div>`;
 }
@@ -295,7 +297,7 @@ async function photoPrompt(q, scr) {
   return option ? `${body}\n→ ${option}` : body;
 }
 
-function playGeneration(src, prompt, myKey) {
+function playGeneration(src, prompt, myBuild) {
   stageBody.innerHTML = `
     <div class="gen-stage">
       <div class="gen-prompt"><span class="gen-label">PROMPT</span><span id="genText"></span><span class="gen-caret"></span></div>
@@ -319,7 +321,7 @@ function playGeneration(src, prompt, myKey) {
 
   return new Promise(resolve => {
     function frame(now) {
-      if (viewKey !== myKey) { resolve(); return; } // 司会者が別の表示に切り替えた
+      if (buildId !== myBuild) { resolve(); return; } // 表示が切り替わった・作り直された
       const t = now - start;
       textEl.textContent = prompt.slice(0, Math.ceil(prompt.length * Math.min(1, t / GEN_TYPE_MS)));
 
@@ -347,20 +349,84 @@ function playGeneration(src, prompt, myKey) {
   });
 }
 
+/* ---------- ランキング発表（4位以下→3位→2位→1位の順に、ためを作って発表） ---------- */
+
+const RANK_LIST_STEP_MS = 500;                 // 4位以下を1人ずつ出す間隔
+const RANK_SUSPENSE_MS = { 3: 2500, 2: 3000, 1: 4500 };  // 「第○位は…」から発表までのため
+const RANK_LIST_MAX = 7;                       // 右側に出す4位以下の人数
+
 async function buildRanking() {
-  stageBody.innerHTML = '<h1 class="stage-title">正解ランキング</h1><ol class="stage-ranking" id="stageRanking"></ol>';
-  const myKey = viewKey;
-  const rows = (await computeRanking(db, questions, participants)).slice(0, 10);
-  if (viewKey !== myKey) return;
-  const list = document.getElementById('stageRanking');
-  if (!rows.length) { list.innerHTML = '<li>参加者がいません</li>'; return; }
-  // 下位から順に登場させる
-  list.innerHTML = rows.map((r, i) => `
-    <li class="${r.rank <= 3 ? 'rank-' + r.rank : ''}" style="animation-delay:${(rows.length - 1 - i) * 0.6}s">
-      <span class="rank-num">${rankMedal(r.rank)}</span>
-      <span class="rank-name">${escapeHtml(r.nickname)}</span>
-      <span class="rank-score">${r.score}点</span>
-    </li>`).join('');
+  stageBody.innerHTML = '<h1 class="stage-title">正解ランキング <span class="rank-announce" id="rankAnnounce"></span></h1><div class="rank-layout" id="rankLayout"></div>';
+  const myBuild = buildId;
+  // 画面を開いた直後だと購読中のデータがまだ届いていないので、その場で取り直す
+  const [qSnap, pSnap] = await Promise.all([get(ref(db, 'questions')), get(ref(db, 'participants'))]);
+  const rows = await computeRanking(db, qSnap.val() || [], pSnap.val() || {});
+  if (buildId !== myBuild) return;
+  const layout = document.getElementById('rankLayout');
+  if (!rows.length) { layout.innerHTML = '<p class="photo-loading">参加者がいません</p>'; return; }
+
+  // 1〜3位は順位ごとにまとめる（同点なら1枚のカードに名前を並べる）
+  const podium = [1, 2, 3]
+    .map(rank => ({ rank, people: rows.filter(r => r.rank === rank) }))
+    .filter(g => g.people.length);
+  const list = rows.filter(r => r.rank > 3).slice(0, RANK_LIST_MAX);
+
+  layout.innerHTML = `
+    <div class="podium">
+      ${podium.map(g => `
+        <div class="podium-card rank-${g.rank}" id="pod-${g.rank}">
+          <span class="podium-medal">${g.rank}</span>
+          <span class="podium-label">第${g.rank}位</span>
+          <span class="podium-names">？？？</span>
+          <span class="podium-score"></span>
+        </div>`).join('')}
+    </div>
+    <ol class="rank-list">
+      ${list.map(r => `
+        <li class="is-hidden">
+          <span class="rank-num">${r.rank}位</span>
+          <span class="rank-name">${escapeHtml(r.nickname)}</span>
+          <span class="rank-score">${r.score}点</span>
+        </li>`).join('')}
+    </ol>`;
+
+  const reveal = (g) => {
+    const card = document.getElementById(`pod-${g.rank}`);
+    card.classList.remove('is-suspense');
+    card.classList.add('is-revealed');
+    card.querySelector('.podium-names').textContent = g.people.map(p => p.nickname).join('・');
+    card.querySelector('.podium-score').textContent = `${g.people[0].score}点`;
+  };
+  const items = [...layout.querySelectorAll('.rank-list li')];
+
+  if (isPreview) { // 司会者画面の縮小プレビューは結果だけ表示
+    items.forEach(li => li.classList.remove('is-hidden'));
+    podium.forEach(reveal);
+    return;
+  }
+
+  const announce = document.getElementById('rankAnnounce');
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const alive = () => buildId === myBuild; // 表示が切り替わった・作り直されたら止める
+
+  for (const li of items.reverse()) {
+    li.classList.remove('is-hidden');
+    await wait(RANK_LIST_STEP_MS);
+    if (!alive()) return;
+  }
+  await wait(800);
+  for (const g of [...podium].reverse()) {
+    if (!alive()) return;
+    const card = document.getElementById(`pod-${g.rank}`);
+    card.classList.add('is-suspense');
+    announce.textContent = g.rank === 1 ? 'いよいよ第1位は…' : `第${g.rank}位は…`;
+    await wait(RANK_SUSPENSE_MS[g.rank]);
+    if (!alive()) return;
+    announce.textContent = '';
+    reveal(g);
+    if (g.rank === 1) launchConfetti();
+    await wait(1200);
+  }
 }
 
 function launchConfetti() {
