@@ -104,7 +104,7 @@ import { firebaseConfig } from './js/firebase-config.js';
 import { tallyVotes, scoringOptions, computeRanking, rankMedal, newQuestionId, defaultQuestions, compressImage, escapeHtml } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getDatabase, ref, set, get, update, onValue, child, push, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getDatabase, ref, set, get, update, onValue, child, push, remove, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -183,8 +183,9 @@ function showToast(msg) {
   toast._hideTimer = setTimeout(() => toast.classList.remove('show'), 1600);
 }
 
+// updatedAt：進行操作がスマホに届くまでの時間をリハーサルで測るためのサーバー時刻
 function updateSession(patch) {
-  update(ref(db, 'session'), patch).catch(e => alert('更新に失敗しました: ' + e.message));
+  update(ref(db, 'session'), { ...patch, updatedAt: serverTimestamp() }).catch(e => alert('更新に失敗しました: ' + e.message));
 }
 
 async function onNextQuestion() {
@@ -193,7 +194,7 @@ async function onNextQuestion() {
     alert('最後の問題です。正解ランキングを表示しましょう。');
     return;
   }
-  await update(ref(db, 'session'), { status: 'waiting', currentQuestionIndex: next, screen: { mode: 'auto' } });
+  await update(ref(db, 'session'), { status: 'waiting', currentQuestionIndex: next, screen: { mode: 'auto' }, updatedAt: serverTimestamp() });
   showToast(`第${next + 1}問に進みました`);
 }
 
