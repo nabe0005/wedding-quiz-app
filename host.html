@@ -268,7 +268,7 @@ function renderMediaStrip(container, qid, editable) {
 
   container.querySelectorAll('.media-show').forEach(btn => btn.onclick = (e) => {
     flashButton(e.currentTarget);
-    setScreen({ mode: 'photo', qid, photoKey: btn.dataset.key });
+    setScreen({ mode: 'photo', qid, photoKey: btn.dataset.key, at: Date.now() }); // at：同じ写真でも押し直すと演出をやり直す
   });
   container.querySelectorAll('.media-del').forEach(btn => btn.onclick = async () => {
     if (!confirm('この写真を削除しますか？')) return;

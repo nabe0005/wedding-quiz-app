@@ -258,9 +258,93 @@ async function buildPhoto(scr) {
   const snap = await get(ref(db, `media/${scr.qid}/${scr.photoKey}`)).catch(() => null);
   if (viewKey !== myKey) return; // 読み込み中に表示が切り替わった
   const data = snap && snap.val();
-  stageBody.innerHTML = data
-    ? `<div class="photo-wrap"><img src="${data}" alt=""></div>`
-    : '<div class="photo-wrap"><p class="photo-loading">写真が見つかりませんでした</p></div>';
+  if (!data) {
+    stageBody.innerHTML = '<div class="photo-wrap"><p class="photo-loading">写真が見つかりませんでした</p></div>';
+    return;
+  }
+  // 未来編（正解なしの問題）の写真だけ、その場でAIが生成しているように見せる
+  const q = questions.find(x => x && x.id === scr.qid);
+  if (q && q.noCorrect && !isPreview) {
+    const prompt = await photoPrompt(q, scr);
+    if (viewKey !== myKey) return;
+    await playGeneration(data, prompt, myKey);
+    if (viewKey !== myKey) return;
+  }
+  stageBody.innerHTML = `<div class="photo-wrap"><img src="${data}" alt=""></div>`;
+}
+
+/* ---------- AI画像生成の演出（約8秒） ---------- */
+
+const GEN_TYPE_MS = 2000;   // プロンプトを打ち込む時間
+const GEN_TOTAL_MS = 8000;  // 演出全体の長さ
+const GEN_STEPS = [
+  [0, 'プロンプトを解析中…'],
+  [0.15, 'ノイズを生成中…'],
+  [0.35, '構図を推定中…'],
+  [0.6, 'ディテールを描き込み中…'],
+  [0.85, '仕上げ中…'],
+  [1, '完成！']
+];
+
+// 写真は選択肢A〜Dの順に登録されているので、何枚目かで選択肢の文言を引く
+async function photoPrompt(q, scr) {
+  const body = splitCategory(q.text).body;
+  const snap = await get(ref(db, `mediaThumbs/${scr.qid}`)).catch(() => null);
+  const keys = Object.keys((snap && snap.val()) || {}).sort();
+  const option = (q.options || [])[keys.indexOf(scr.photoKey)];
+  return option ? `${body}\n→ ${option}` : body;
+}
+
+function playGeneration(src, prompt, myKey) {
+  stageBody.innerHTML = `
+    <div class="gen-stage">
+      <div class="gen-prompt"><span class="gen-label">PROMPT</span><span id="genText"></span><span class="gen-caret"></span></div>
+      <div class="gen-frame">
+        <img id="genImg" src="${src}" alt="">
+        <canvas id="genNoise" width="192" height="108"></canvas>
+      </div>
+      <div class="gen-progress">
+        <span class="gen-spinner"></span>
+        <span id="genStep">AI画像生成中…</span>
+        <div class="gen-bar"><div id="genBar"></div></div>
+        <span id="genPct">0%</span>
+      </div>
+    </div>`;
+  const textEl = document.getElementById('genText');
+  const img = document.getElementById('genImg');
+  const noise = document.getElementById('genNoise');
+  const nctx = noise.getContext('2d');
+  const nimg = nctx.createImageData(noise.width, noise.height);
+  const start = performance.now();
+
+  return new Promise(resolve => {
+    function frame(now) {
+      if (viewKey !== myKey) { resolve(); return; } // 司会者が別の表示に切り替えた
+      const t = now - start;
+      textEl.textContent = prompt.slice(0, Math.ceil(prompt.length * Math.min(1, t / GEN_TYPE_MS)));
+
+      // 打ち込み後、ノイズの中から絵がだんだん浮かび上がる
+      const p = Math.max(0, Math.min(1, (t - GEN_TYPE_MS) / (GEN_TOTAL_MS - GEN_TYPE_MS)));
+      const ease = p * p * (3 - 2 * p);
+      img.style.filter = `blur(${(1 - ease) * 40}px) saturate(${0.2 + ease * 0.8}) contrast(${1.4 - ease * 0.4})`;
+      img.style.opacity = Math.min(1, p * 3);
+      noise.style.opacity = 1 - ease;
+      for (let i = 0; i < nimg.data.length; i += 4) {
+        const v = Math.random() * 255;
+        nimg.data[i] = v; nimg.data[i + 1] = v; nimg.data[i + 2] = v; nimg.data[i + 3] = 255;
+      }
+      nctx.putImageData(nimg, 0, 0);
+
+      const pct = Math.floor(p * 100);
+      document.getElementById('genBar').style.width = pct + '%';
+      document.getElementById('genPct').textContent = pct + '%';
+      document.getElementById('genStep').textContent = GEN_STEPS.filter(([at]) => p >= at).pop()[1];
+
+      if (t < GEN_TOTAL_MS) requestAnimationFrame(frame);
+      else setTimeout(resolve, 600); // 「完成！」を少し見せてから写真表示へ
+    }
+    requestAnimationFrame(frame);
+  });
 }
 
 async function buildRanking() {
