@@ -30,10 +30,11 @@
 </div>
 
 <button id="fsBtn" class="fs-btn" type="button">⛶ 全画面にする</button>
+<div class="conn-screen" id="connScreen">通信が切れています（自動で再接続します）</div>
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { OPTION_LABELS, scoringOptions, tallyVotes, computeRanking, splitCategory, escapeHtml } from './js/quiz-utils.js';
+import { OPTION_LABELS, scoringOptions, tallyVotes, computeRanking, splitCategory, escapeHtml, watchConnection } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -41,6 +42,9 @@ import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/fir
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
+watchConnection(db, (state) => {
+  document.getElementById('connScreen').classList.toggle('show', state === 'offline');
+});
 
 const isPreview = new URLSearchParams(location.search).has('preview');
 const gate = document.getElementById('gate');

@@ -297,3 +297,23 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .name-view { align-items: center; justify-content: space-between; gap: 10px; }
 .name-view b { word-break: break-all; }
 .name-edit-btn { flex: none; font-size: 13px; padding: 6px 12px; box-shadow: 2px 2px 0 var(--ink); }
+
+/* 接続状態（司会者画面は常に表示、参加者画面は切れたときだけ帯を出す） */
+.conn-host {
+  display: flex; align-items: center; gap: 8px; margin-top: 12px;
+  padding: 8px 14px; border: 3px solid var(--ink); border-radius: 12px;
+  font-size: 14px; font-weight: 900; background: #fff;
+}
+.conn-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: #aaa; }
+.conn-host.online .conn-dot { background: var(--green); }
+.conn-host.connecting .conn-dot { background: var(--yellow); animation: connBlink 1s infinite; }
+.conn-host.offline { background: var(--red); color: #fff; }
+.conn-host.offline .conn-dot { background: #fff; animation: connBlink 0.8s infinite; }
+@keyframes connBlink { 50% { opacity: 0.25; } }
+
+.conn-banner {
+  display: none; position: sticky; top: 0; z-index: 900;
+  background: var(--red); color: #fff; font-size: 13px; font-weight: 900;
+  padding: 10px 14px; text-align: center; border-bottom: 3px solid var(--ink);
+}
+.conn-banner.show { display: block; }

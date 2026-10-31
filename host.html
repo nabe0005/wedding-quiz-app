@@ -27,6 +27,9 @@
       <div><span class="status-pill">参加人数：<b id="participantCount">0</b>人</span></div>
       <div style="text-align:right;"><span class="status-pill" id="statusPill">待機中</span></div>
     </div>
+    <div class="conn-host connecting" id="connHost">
+      <span class="conn-dot"></span><span id="connHostText">接続しています…</span>
+    </div>
   </div>
 
   <div class="card">
@@ -101,7 +104,7 @@
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { tallyVotes, scoringOptions, computeRanking, rankMedal, newQuestionId, defaultQuestions, compressImage, escapeHtml } from './js/quiz-utils.js';
+import { tallyVotes, scoringOptions, computeRanking, rankMedal, newQuestionId, defaultQuestions, compressImage, escapeHtml, watchConnection } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, update, onValue, child, push, remove, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -109,6 +112,16 @@ import { getDatabase, ref, set, get, update, onValue, child, push, remove, serve
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
+
+const CONN_HOST_TEXT = {
+  connecting: '接続しています…',
+  online: '接続中',
+  offline: '切断中：自動で再接続します（押した操作は、つながり直したときに送られます）'
+};
+watchConnection(db, (state) => {
+  document.getElementById('connHost').className = 'conn-host ' + state;
+  document.getElementById('connHostText').textContent = CONN_HOST_TEXT[state];
+});
 
 const gate = document.getElementById('gate');
 const main = document.getElementById('main');

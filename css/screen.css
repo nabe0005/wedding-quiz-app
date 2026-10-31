@@ -222,3 +222,11 @@ body.is-preview .podium-card, body.is-preview .photo-wrap img { animation: none;
 .gen-bar div { height: 100%; width: 0; background: linear-gradient(90deg, var(--blue), var(--purple), var(--pink)); }
 .gen-spinner { width: 3vh; height: 3vh; border: 0.5vh solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: genSpin 0.8s linear infinite; }
 @keyframes genSpin { to { transform: rotate(360deg); } }
+
+/* 通信が切れたときだけ、隅に小さく出す */
+.conn-screen {
+  display: none; position: fixed; left: 2vw; bottom: 2vh; z-index: 1000;
+  background: var(--red); color: #fff; font-size: 2vh; font-weight: 900;
+  padding: 0.8vh 1.8vh; border: 0.3vh solid var(--ink); border-radius: 999px;
+}
+.conn-screen.show { display: block; }

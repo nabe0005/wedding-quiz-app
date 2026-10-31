@@ -1,7 +1,7 @@
 // ============================================================
 // 司会者画面・スクリーン画面で共通の処理
 // ============================================================
-import { ref, get, child } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { ref, get, child, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 export const OPTION_LABELS = 'ABCD';
 
@@ -107,6 +107,16 @@ export function compressImage(file, maxSize, quality) {
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('画像を読み込めませんでした')); };
     img.src = url;
+  });
+}
+
+// Firebaseとの接続状態を 'connecting'（開いた直後）/ 'online' / 'offline'（一度つながった後に切れた）で知らせる。
+// 切れている間の書き込みは端末にたまり、つながり直すと自動で送られる
+export function watchConnection(db, onChange) {
+  let everConnected = false;
+  onValue(ref(db, '.info/connected'), (snap) => {
+    if (snap.val() === true) { everConnected = true; onChange('online'); }
+    else onChange(everConnected ? 'offline' : 'connecting');
   });
 }
 

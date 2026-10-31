@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+<div class="conn-banner" id="connBanner">📶 通信が不安定です。電波の良い場所で少しお待ちください（自動で再接続します）</div>
 <div class="wrap">
   <div class="eyebrow">新郎新婦クイズ★</div>
   <h1 class="title">クイズに参加しよう！</h1>
@@ -53,7 +54,7 @@
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { splitCategory } from './js/quiz-utils.js';
+import { splitCategory, watchConnection } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, update, onValue, child } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -61,6 +62,9 @@ import { getDatabase, ref, set, get, update, onValue, child } from "https://www.
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
+watchConnection(db, (state) => {
+  document.getElementById('connBanner').classList.toggle('show', state === 'offline');
+});
 
 const joinScreen = document.getElementById('joinScreen');
 const voteScreen = document.getElementById('voteScreen');
