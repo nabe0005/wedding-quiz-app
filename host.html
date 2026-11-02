@@ -24,7 +24,7 @@
 
   <div class="card">
     <div class="row">
-      <div><span class="status-pill">参加人数：<b id="participantCount">0</b>人</span></div>
+      <div><span class="status-pill">参加人数：<b id="participantCount">0</b>人（ゲスト<b id="guestCount">0</b>・親族<b id="familyCount">0</b>）</span></div>
       <div style="text-align:right;"><span class="status-pill" id="statusPill">待機中</span></div>
     </div>
     <div class="conn-host connecting" id="connHost">
@@ -43,6 +43,7 @@
       <button class="btn-secondary screen-mode-btn" data-mode="auto">問題（自動）</button>
       <button class="btn-secondary screen-mode-btn" data-mode="join">参加QRコード</button>
       <button class="btn-secondary screen-mode-btn" data-mode="ranking">ランキング発表</button>
+      <button class="btn-secondary screen-mode-btn" data-mode="familyRanking">親族ランキング</button>
     </div>
     <p class="small-note">「投票受付開始」「締切」「結果を公開」「次の問題へ」を押すと、スクリーンは自動で問題表示に戻ります。</p>
   </div>
@@ -82,9 +83,11 @@
   </div>
 
   <div class="card">
-    <h3 style="font-size:16px;">正解ランキング</h3>
+    <h3 style="font-size:16px;">正解ランキング（景品対象：ゲストのみ）</h3>
     <button id="rankingBtn" class="btn-primary btn-block">順位を表示する</button>
     <ol id="rankingList" class="ranking-list"></ol>
+    <h4 style="font-size:13px; margin-top:16px;">親族ランキング（参考）</h4>
+    <ol id="familyRankingList" class="ranking-list"></ol>
     <h4 style="font-size:13px; margin-top:16px;">参加者一覧</h4>
     <ul class="participant-list" id="participantList"></ul>
   </div>
@@ -100,11 +103,16 @@
     <p class="small-note">余興終了後、問題・写真・投票・参加者データを完全に削除します（元に戻せません）。</p>
     <button id="resetBtn" class="btn-danger btn-block">全データを削除する（問題・写真も消えます）</button>
   </div>
+
+  <div class="simple-bar">
+    <div class="simple-info"><b id="simpleWhere">第1問</b><span id="simpleHint"></span></div>
+    <button id="simpleNextBtn" class="btn-primary simple-next" disabled>▶ 次へ</button>
+  </div>
 </div>
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { tallyVotes, scoringOptions, computeRanking, rankMedal, newQuestionId, defaultQuestions, compressImage, escapeHtml, watchConnection } from './js/quiz-utils.js';
+import { tallyVotes, scoringOptions, computeRanking, rankMedal, newQuestionId, defaultQuestions, compressImage, escapeHtml, watchConnection, isFamily, filterParticipants, nextHostStep } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, update, onValue, child, push, remove, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -173,6 +181,51 @@ function initHostDashboard() {
   document.getElementById('rankingBtn').onclick = (e) => { flashButton(e.currentTarget); showRanking(); };
   document.getElementById('resetBtn').onclick = (e) => { flashButton(e.currentTarget); resetAllData(); };
   document.getElementById('resetVotesBtn').onclick = (e) => { flashButton(e.currentTarget); resetVotesOnly(); };
+  document.getElementById('simpleNextBtn').onclick = (e) => { flashButton(e.currentTarget); runSimpleNext(); };
+}
+
+/* ---------- シンプル操作（「次へ」ボタン1つで進行する） ---------- */
+
+let currentVotes = {};
+let simpleBusy = false;
+let simpleStep = { action: 'none', label: '' };
+
+function refreshSimpleBar() {
+  const qi = currentSession.currentQuestionIndex || 0;
+  const q = currentQuestions[qi];
+  simpleStep = nextHostStep({
+    session: currentSession,
+    questions: currentQuestions,
+    votes: currentVotes,
+    thumbs: q ? mediaThumbs[q.id] : null,
+    familyCount: Object.keys(filterParticipants(currentParticipants, true)).length
+  });
+  document.getElementById('simpleWhere').textContent = currentQuestions.length ? `第${qi + 1}問 / ${currentQuestions.length}問` : '問題なし';
+  const answered = Object.keys(currentVotes).length;
+  const total = Object.keys(currentParticipants).length;
+  document.getElementById('simpleHint').textContent = currentSession.status === 'voting' ? `回答 ${answered} / ${total}人` : '';
+  const btn = document.getElementById('simpleNextBtn');
+  const done = simpleStep.action === 'none';
+  btn.textContent = done ? simpleStep.label : `▶ 次へ：${simpleStep.label}`;
+  btn.disabled = done || simpleBusy;
+}
+
+async function runSimpleNext() {
+  if (simpleBusy) return;
+  const step = simpleStep;
+  simpleBusy = true; // 連打で段階を飛ばさないよう、少し押せなくする
+  refreshSimpleBar();
+  const actions = {
+    start: () => { updateSession({ status: 'voting', screen: { mode: 'auto' } }); showToast('投票受付を開始しました'); },
+    close: () => { updateSession({ status: 'closed', screen: { mode: 'auto' } }); showToast('締切りました'); },
+    reveal: () => { updateSession({ status: 'revealed', screen: { mode: 'auto' } }); showToast('結果を公開しました'); },
+    photo: () => setScreen({ mode: 'photo', qid: step.qid, photoKey: step.photoKey, at: Date.now() }),
+    nextQuestion: () => onNextQuestion(),
+    ranking: () => setScreen({ mode: 'ranking', at: Date.now() }),
+    familyRanking: () => setScreen({ mode: 'familyRanking', at: Date.now() })
+  };
+  await actions[step.action]?.();
+  setTimeout(() => { simpleBusy = false; refreshSimpleBar(); }, 800);
 }
 
 function flashButton(el) {
@@ -213,7 +266,7 @@ async function onNextQuestion() {
 
 /* ---------- スクリーン表示の切り替え ---------- */
 
-const SCREEN_MODE_LABELS = { auto: '問題（自動）', join: '参加QRコード', ranking: 'ランキング発表', photo: '写真' };
+const SCREEN_MODE_LABELS = { auto: '問題（自動）', join: '参加QRコード', ranking: 'ランキング発表', familyRanking: '親族ランキング', photo: '写真' };
 
 function initScreenControls() {
   document.getElementById('screenPreviewFrame').src = 'screen.html?preview=1';
@@ -224,7 +277,7 @@ function initScreenControls() {
     btn.onclick = (e) => {
       flashButton(e.currentTarget);
       const mode = btn.dataset.mode;
-      setScreen(mode === 'ranking' ? { mode, at: Date.now() } : { mode });
+      setScreen(mode === 'ranking' || mode === 'familyRanking' ? { mode, at: Date.now() } : { mode });
     };
   });
 
@@ -257,6 +310,7 @@ function listenMediaThumbs() {
   onValue(ref(db, 'mediaThumbs'), (snap) => {
     mediaThumbs = snap.val() || {};
     renderAllMediaStrips();
+    refreshSimpleBar();
   });
 }
 
@@ -416,6 +470,7 @@ function listenQuestionsForEditor() {
     // まだ1問も保存されていなければ、本番用の初期問題を編集欄に出す（保存するまでDBには入らない）
     if (editingQuestions.length === 0) editingQuestions = defaultQuestions();
     buildQuestionEditors();
+    refreshSimpleBar();
     renderTallyForCurrentQuestion();
     renderSummary();
   });
@@ -454,6 +509,7 @@ function listenSession() {
       val.status === 'revealed' ? '結果発表' : '待機中';
     listenVotesForTally();
     renderAllMediaStrips();
+    refreshSimpleBar();
   });
 }
 
@@ -462,14 +518,18 @@ function listenParticipants() {
     currentParticipants = snap.val() || {};
     const ids = Object.keys(currentParticipants);
     document.getElementById('participantCount').textContent = ids.length;
+    const familyIds = ids.filter(uid => isFamily(currentParticipants[uid]));
+    document.getElementById('familyCount').textContent = familyIds.length;
+    document.getElementById('guestCount').textContent = ids.length - familyIds.length;
     const list = document.getElementById('participantList');
     list.innerHTML = '';
     ids.forEach(uid => {
       const p = currentParticipants[uid];
       const li = document.createElement('li');
-      li.innerHTML = `<span>${escapeHtml(p.nickname || '名無し')}</span>`;
+      li.innerHTML = `<span>${escapeHtml(p.nickname || '名無し')}</span><span class="group-tag ${isFamily(p) ? 'family' : ''}">${isFamily(p) ? '親族' : 'ゲスト'}</span>`;
       list.appendChild(li);
     });
+    refreshSimpleBar();
   });
 }
 
@@ -477,7 +537,9 @@ let currentVoteUnsub = null;
 function listenVotesForTally() {
   const qIndex = currentSession.currentQuestionIndex || 0;
   if (currentVoteUnsub) currentVoteUnsub();
-  currentVoteUnsub = onValue(ref(db, `votes/${qIndex}`), () => {
+  currentVoteUnsub = onValue(ref(db, `votes/${qIndex}`), (snap) => {
+    currentVotes = snap.val() || {};
+    refreshSimpleBar();
     renderTallyForCurrentQuestion();
     renderSummary();
   });
@@ -530,8 +592,14 @@ async function renderSummary() {
 /* ---------- 正解ランキング ---------- */
 
 async function showRanking() {
-  const rows = await computeRanking(db, currentQuestions, currentParticipants);
-  const list = document.getElementById('rankingList');
+  await renderRankingList('rankingList', false, 'ゲストの参加者がいません');
+  await renderRankingList('familyRankingList', true, '親族の参加者がいません');
+}
+
+// ゲストと親族は別々に順位をつける
+async function renderRankingList(listId, family, emptyText) {
+  const rows = await computeRanking(db, currentQuestions, filterParticipants(currentParticipants, family));
+  const list = document.getElementById(listId);
   list.innerHTML = '';
   rows.forEach(r => {
     const li = document.createElement('li');
@@ -539,7 +607,7 @@ async function showRanking() {
     li.innerHTML = `<span class="rank-num">${rankMedal(r.rank)}</span><span>${escapeHtml(r.nickname)}</span><span class="rank-score">${r.score}点</span>`;
     list.appendChild(li);
   });
-  if (rows.length === 0) list.innerHTML = '<li>参加者がいません</li>';
+  if (rows.length === 0) list.innerHTML = `<li>${emptyText}</li>`;
 }
 
 /* ---------- リハーサル後のリセット・終了処理 ---------- */
@@ -553,6 +621,7 @@ async function resetVotesOnly() {
       votes: null
     });
     document.getElementById('rankingList').innerHTML = '';
+    document.getElementById('familyRankingList').innerHTML = '';
     showToast('投票・参加者を削除しました');
   } catch (e) {
     alert('削除に失敗しました: ' + e.message);

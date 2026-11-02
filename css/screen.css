@@ -230,3 +230,20 @@ body.is-preview .podium-card, body.is-preview .photo-wrap img { animation: none;
   padding: 0.8vh 1.8vh; border: 0.3vh solid var(--ink); border-radius: 999px;
 }
 .conn-screen.show { display: block; }
+
+/* ---------- 親族ランキング（参考） ---------- */
+.family-sub { font-size: 3.4vh; }
+.family-list {
+  list-style: none; margin: 2.4vh 0 0; padding: 0; flex: 1; min-height: 0;
+  display: grid; grid-auto-flow: column; grid-template-rows: repeat(8, 1fr); grid-auto-columns: 1fr; gap: 1.4vh 2vw;
+}
+.family-list li {
+  display: flex; align-items: center; gap: 1.6vh; min-width: 0;
+  background: rgba(255, 255, 255, 0.92); border: 0.4vh solid var(--ink); border-radius: 1.6vh;
+  box-shadow: 0.5vh 0.5vh 0 var(--ink); padding: 0 2.2vh; font-weight: 900; font-size: 3vh;
+  opacity: 0; animation: rankIn 0.4s ease forwards;
+}
+@keyframes rankIn { from { opacity: 0; transform: translateY(1.6vh); } to { opacity: 1; transform: none; } }
+.family-list .rank-num { flex: none; min-width: 7vh; }
+.family-list .rank-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.family-list .rank-score { margin-left: auto; color: var(--pink-deep); flex: none; }

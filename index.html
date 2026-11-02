@@ -13,9 +13,15 @@
   <h1 class="title">クイズに参加しよう！</h1>
 
   <div id="joinScreen" class="card">
-    <label for="nicknameInput">お名前・ニックネーム（空欄でもOK）</label>
+    <label>どちらで参加しますか？</label>
+    <div class="group-tabs" id="joinGroupTabs">
+      <button type="button" class="group-tab" data-group="guest">ゲスト</button>
+      <button type="button" class="group-tab" data-group="family">親族</button>
+    </div>
+    <p class="small-note group-note" id="joinGroupNote">どちらかを選んでください。</p>
+    <label for="nicknameInput" style="margin-top:14px;">お名前・ニックネーム（空欄でもOK）</label>
     <input type="text" id="nicknameInput" placeholder="例：たなか" maxlength="20">
-    <button id="joinBtn" class="btn-primary btn-block" style="margin-top:14px;">参加する</button>
+    <button id="joinBtn" class="btn-primary btn-block" style="margin-top:14px;" disabled>参加する</button>
     <p class="small-note">個人情報の入力は不要です。名前は順位発表にのみ使われます。</p>
   </div>
 
@@ -25,6 +31,10 @@
       <button type="button" id="nameEditBtn" class="name-edit-btn">✎ 変更</button>
     </div>
     <div id="nameEdit" style="display:none;">
+      <div class="group-tabs" id="editGroupTabs" style="margin-bottom:10px;">
+        <button type="button" class="group-tab" data-group="guest">ゲスト</button>
+        <button type="button" class="group-tab" data-group="family">親族</button>
+      </div>
       <input type="text" id="nameInput" maxlength="20" placeholder="新しいお名前・ニックネーム">
       <div class="row" style="margin-top:10px;">
         <button type="button" id="nameCancelBtn" class="btn-secondary">やめる</button>
@@ -54,7 +64,7 @@
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { splitCategory, watchConnection } from './js/quiz-utils.js';
+import { splitCategory, watchConnection, isFamily } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, update, onValue, child } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -99,13 +109,42 @@ signInAnonymously(auth).catch((err) => {
   console.error(err);
 });
 
+/* ---------- ゲスト／親族の選択 ---------- */
+
+const GROUP_NOTES = {
+  guest: 'ゲストの方は景品ランキングの対象です。',
+  family: '親族の方は景品の対象外です。親族だけのランキングでご紹介します。'
+};
+
+function setupGroupTabs(containerId, onChange) {
+  const container = document.getElementById(containerId);
+  let value = null;
+  const select = (group) => {
+    value = group;
+    container.querySelectorAll('.group-tab').forEach(b => b.classList.toggle('active', b.dataset.group === group));
+    onChange?.(group);
+  };
+  container.querySelectorAll('.group-tab').forEach(b => b.addEventListener('click', () => select(b.dataset.group)));
+  return { get: () => value, select };
+}
+
+const joinTabs = setupGroupTabs('joinGroupTabs', (group) => {
+  document.getElementById('joinGroupNote').textContent = GROUP_NOTES[group];
+  joinBtn.disabled = false;
+});
+const editTabs = setupGroupTabs('editGroupTabs');
+if (localStorage.getItem('wq_group')) joinTabs.select(localStorage.getItem('wq_group'));
+
 joinBtn.addEventListener('click', async () => {
   if (!myUid) { alert('接続中です。数秒待って再度お試しください。'); return; }
-  const nickname = nicknameInput.value.trim() || ('ゲスト' + myUid.slice(0, 4));
+  const group = joinTabs.get();
+  if (!group) return;
+  const nickname = nicknameInput.value.trim() || ((group === 'family' ? '親族' : 'ゲスト') + myUid.slice(0, 4));
   joinBtn.disabled = true;
   try {
-    await set(ref(db, `participants/${myUid}`), { nickname, joinedAt: Date.now(), won: false });
+    await set(ref(db, `participants/${myUid}`), { nickname, group, joinedAt: Date.now(), won: false });
     localStorage.setItem('wq_nickname', nickname);
+    localStorage.setItem('wq_group', group);
     localStorage.setItem('wq_joined', '1');
     joined = true;
     showVoteScreen();
@@ -120,14 +159,21 @@ joinBtn.addEventListener('click', async () => {
 // 司会者が参加者データを削除したら、名前の入力からやり直してもらう
 function listenMyParticipant() {
   onValue(ref(db, `participants/${myUid}`), (snap) => {
-    if (snap.exists() || !joined) return;
+    if (snap.exists()) {
+      // 以前の版で参加した人は group がないのでゲスト扱い。表示は登録内容に合わせる
+      localStorage.setItem('wq_group', isFamily(snap.val()) ? 'family' : 'guest');
+      if (joined && nameView.style.display !== 'none') showNameBar();
+      return;
+    }
+    if (!joined) return;
     joined = false;
     localStorage.removeItem('wq_joined');
     voteScreen.style.display = 'none';
     doneMsg.style.display = 'none';
     nameBar.style.display = 'none';
     joinScreen.style.display = 'block';
-    joinBtn.disabled = false;
+    joinBtn.disabled = !localStorage.getItem('wq_group');
+    if (localStorage.getItem('wq_group')) joinTabs.select(localStorage.getItem('wq_group'));
     nicknameInput.value = localStorage.getItem('wq_nickname') || '';
   });
 }
@@ -147,7 +193,8 @@ const nameInput = document.getElementById('nameInput');
 const nameSaveBtn = document.getElementById('nameSaveBtn');
 
 function showNameBar() {
-  document.getElementById('nameText').textContent = localStorage.getItem('wq_nickname') || '（未設定）';
+  const group = localStorage.getItem('wq_group') === 'family' ? '親族' : 'ゲスト';
+  document.getElementById('nameText').textContent = `${localStorage.getItem('wq_nickname') || '（未設定）'}（${group}）`;
   nameBar.style.display = 'block';
   nameView.style.display = 'flex';
   nameEdit.style.display = 'none';
@@ -155,6 +202,7 @@ function showNameBar() {
 
 document.getElementById('nameEditBtn').addEventListener('click', () => {
   nameInput.value = localStorage.getItem('wq_nickname') || '';
+  editTabs.select(localStorage.getItem('wq_group') === 'family' ? 'family' : 'guest');
   nameView.style.display = 'none';
   nameEdit.style.display = 'block';
   nameInput.focus();
@@ -163,6 +211,7 @@ document.getElementById('nameCancelBtn').addEventListener('click', showNameBar);
 
 nameSaveBtn.addEventListener('click', async () => {
   const nickname = nameInput.value.trim();
+  const group = editTabs.get();
   if (!nickname) { alert('お名前を入力してください。'); return; }
   if (!myUid) { alert('接続中です。数秒待って再度お試しください。'); return; }
   nameSaveBtn.disabled = true;
@@ -170,9 +219,10 @@ nameSaveBtn.addEventListener('click', async () => {
     const path = `participants/${myUid}`;
     const snap = await get(ref(db, path));
     // 司会者がデータを削除した後などで登録が消えていたら、参加し直す形で登録する
-    if (snap.exists()) await update(ref(db, path), { nickname });
-    else await set(ref(db, path), { nickname, joinedAt: Date.now(), won: false });
+    if (snap.exists()) await update(ref(db, path), { nickname, group });
+    else await set(ref(db, path), { nickname, group, joinedAt: Date.now(), won: false });
     localStorage.setItem('wq_nickname', nickname);
+    localStorage.setItem('wq_group', group);
     showNameBar();
   } catch (e) {
     alert('名前の変更に失敗しました。もう一度お試しください。');

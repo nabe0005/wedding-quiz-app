@@ -83,6 +83,48 @@ export async function computeRanking(db, questions, participants) {
   return rows;
 }
 
+// 親族は景品ランキングの対象外。group がない参加者はゲストとして扱う
+export function isFamily(p) {
+  return p?.group === 'family';
+}
+
+export function filterParticipants(participants, family) {
+  return Object.fromEntries(Object.entries(participants || {}).filter(([, p]) => isFamily(p) === family));
+}
+
+// 結果公開後に映す写真の順番。未来編は最多票の選択肢の写真（同数ならすべて）、それ以外は登録順にすべて
+function photoQueue(q, votes, thumbs) {
+  const keys = Object.keys(thumbs || {}).sort();
+  if (q?.noCorrect) {
+    return scoringOptions(q, tallyVotes(votes))
+      .filter(i => keys[i])
+      .map(i => ({ key: keys[i], label: `写真を映す（${OPTION_LABELS[i]}）` }));
+  }
+  return keys.map((key, i) => ({ key, label: keys.length > 1 ? `写真を映す（${i + 1}/${keys.length}枚目）` : '写真を映す' }));
+}
+
+// 司会者の「次へ」ボタンで次に行う操作を、今の進行状況から決める
+export function nextHostStep({ session, questions, votes, thumbs, familyCount }) {
+  if (!questions?.length) return { action: 'none', label: '問題がありません' };
+  const qi = session?.currentQuestionIndex || 0;
+  const q = questions[qi];
+  const status = session?.status || 'waiting';
+  const scr = session?.screen || {};
+
+  if (status === 'waiting') return { action: 'start', label: '投票受付開始' };
+  if (status === 'voting') return { action: 'close', label: '締切' };
+  if (status === 'closed') return { action: 'reveal', label: '結果を公開' };
+
+  const queue = photoQueue(q, votes, thumbs);
+  const shown = scr.mode === 'photo' && scr.qid === q?.id ? queue.findIndex(p => p.key === scr.photoKey) : -1;
+  if (shown + 1 < queue.length) return { action: 'photo', label: queue[shown + 1].label, qid: q.id, photoKey: queue[shown + 1].key };
+
+  if (qi + 1 < questions.length) return { action: 'nextQuestion', label: `次の問題へ（第${qi + 2}問）` };
+  if (scr.mode !== 'ranking' && scr.mode !== 'familyRanking') return { action: 'ranking', label: 'ランキング発表' };
+  if (scr.mode === 'ranking' && familyCount > 0) return { action: 'familyRanking', label: '親族ランキング' };
+  return { action: 'none', label: 'すべて終了しました' };
+}
+
 export function rankMedal(rank) {
   return rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}位`;
 }

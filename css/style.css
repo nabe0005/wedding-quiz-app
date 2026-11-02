@@ -317,3 +317,25 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   padding: 10px 14px; text-align: center; border-bottom: 3px solid var(--ink);
 }
 .conn-banner.show { display: block; }
+
+/* 参加者：ゲスト／親族の切り替え */
+.group-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.group-tab { padding: 11px 8px; box-shadow: 2px 2px 0 var(--ink); background: #fff; opacity: 0.75; }
+.group-tab.active { opacity: 1; background: var(--yellow); box-shadow: inset 0 0 0 2px var(--ink); }
+.group-note { min-height: 1.4em; }
+
+/* 司会者：参加者一覧の区分 */
+.group-tag { flex: none; font-size: 11px; font-weight: 900; padding: 2px 8px; border-radius: 999px; border: 2px solid var(--ink); background: #fff; }
+.group-tag.family { background: var(--purple); color: #fff; }
+
+/* 司会者：画面下に固定する「次へ」ボタン */
+#main.wrap.host { padding-bottom: 120px; }
+.simple-bar {
+  position: fixed; left: 50%; bottom: 0; transform: translateX(-50%); z-index: 800;
+  width: min(100%, 760px); display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; background: var(--cream); border: 4px solid var(--ink); border-bottom: none;
+  border-radius: 18px 18px 0 0; box-shadow: 0 -4px 14px rgba(43, 34, 80, 0.25);
+}
+.simple-info { flex: none; display: flex; flex-direction: column; font-size: 14px; font-weight: 900; line-height: 1.5; }
+.simple-info span { color: var(--pink-deep); font-size: 13px; }
+.simple-next { flex: 1; min-width: 0; font-size: 18px; padding: 15px 12px; }

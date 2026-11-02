@@ -34,7 +34,7 @@
 
 <script type="module">
 import { firebaseConfig } from './js/firebase-config.js';
-import { OPTION_LABELS, scoringOptions, tallyVotes, computeRanking, splitCategory, escapeHtml, watchConnection } from './js/quiz-utils.js';
+import { OPTION_LABELS, scoringOptions, tallyVotes, computeRanking, filterParticipants, splitCategory, escapeHtml, watchConnection } from './js/quiz-utils.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -140,7 +140,7 @@ function listenVotes() {
 
 function currentView() {
   const mode = session.screen?.mode || 'auto';
-  if (mode === 'join' || mode === 'photo' || mode === 'ranking') return mode;
+  if (['join', 'photo', 'ranking', 'familyRanking'].includes(mode)) return mode;
   if (!questions.length) return 'join';
   return session.status === 'revealed' ? 'reveal' : 'question';
 }
@@ -161,6 +161,7 @@ function render() {
     if (view === 'join') buildJoin();
     else if (view === 'photo') buildPhoto(scr);
     else if (view === 'ranking') buildRanking();
+    else if (view === 'familyRanking') buildFamilyRanking();
     else buildQuestion(view === 'reveal');
     if (view === 'reveal' && prevView === 'question' && !isPreview) launchConfetti();
   }
@@ -176,6 +177,7 @@ function updateHeader(view) {
   const label =
     view === 'join' ? '' :
     view === 'ranking' ? '正解ランキング' :
+    view === 'familyRanking' ? '親族ランキング（参考）' :
     view === 'photo' ? '' :
     session.status === 'voting' ? '回答受付中！' :
     session.status === 'closed' ? '締切' :
@@ -364,7 +366,8 @@ async function buildRanking() {
   const myBuild = buildId;
   // 画面を開いた直後だと購読中のデータがまだ届いていないので、その場で取り直す
   const [qSnap, pSnap] = await Promise.all([get(ref(db, 'questions')), get(ref(db, 'participants'))]);
-  const rows = await computeRanking(db, qSnap.val() || [], pSnap.val() || {});
+  // 景品の対象はゲストのみ。親族を除いて順位をつける
+  const rows = await computeRanking(db, qSnap.val() || [], filterParticipants(pSnap.val(), false));
   if (buildId !== myBuild) return;
   const layout = document.getElementById('rankLayout');
   if (!rows.length) { layout.innerHTML = '<p class="photo-loading">参加者がいません</p>'; return; }
@@ -431,6 +434,26 @@ async function buildRanking() {
     if (g.rank === 1) launchConfetti();
     await wait(1200);
   }
+}
+
+/* ---------- 親族ランキング（参考の紹介なので、ためや紙吹雪なし） ---------- */
+
+const FAMILY_LIST_MAX = 24;
+
+async function buildFamilyRanking() {
+  stageBody.innerHTML = '<h1 class="stage-title">親族ランキング <span class="family-sub">（参考）</span></h1><ol class="family-list" id="familyList"></ol>';
+  const myBuild = buildId;
+  const [qSnap, pSnap] = await Promise.all([get(ref(db, 'questions')), get(ref(db, 'participants'))]);
+  const rows = (await computeRanking(db, qSnap.val() || [], filterParticipants(pSnap.val(), true))).slice(0, FAMILY_LIST_MAX);
+  if (buildId !== myBuild) return;
+  const list = document.getElementById('familyList');
+  if (!rows.length) { list.innerHTML = '<li>親族の参加者がいません</li>'; return; }
+  list.innerHTML = rows.map((r, i) => `
+    <li style="animation-delay:${isPreview ? 0 : (rows.length - 1 - i) * 0.25}s">
+      <span class="rank-num">${r.rank}位</span>
+      <span class="rank-name">${escapeHtml(r.nickname)}</span>
+      <span class="rank-score">${r.score}点</span>
+    </li>`).join('');
 }
 
 function launchConfetti() {
